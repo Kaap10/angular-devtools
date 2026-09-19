@@ -3,6 +3,8 @@ import { defineDevframe } from 'devframe'
 import { getRoutes } from './rpc/get-routes.ts'
 import { getComponents } from './rpc/get-components.ts'
 import { getBuildMeta } from './rpc/build-meta.ts'
+import { getSignals } from './rpc/get-signals.ts'
+import { getProviders } from './rpc/get-providers.ts'
 import type {} from './types.ts'
 
 import pkg from '../package.json' with { type: 'json' }
@@ -28,6 +30,8 @@ const ngDevtools = defineDevframe({
 
     my.rpc.register(getRoutes)
     my.rpc.register(getComponents)
+    my.rpc.register(getSignals)
+    my.rpc.register(getProviders)
     my.rpc.register(getBuildMeta)
 
     const componentTree = await my.rpc.sharedState('component-tree', {

@@ -7,6 +7,15 @@ interface ProviderInfo {
   isViewProvider: boolean
 }
 
+interface SourceProvider {
+  token: string
+  source: string
+  file: string
+  line: number
+  providedIn?: string
+  type: string
+}
+
 interface InjectorNode {
   injector: { id: string; type: string; name: string; providerCount: number }
   providers: ProviderInfo[]
@@ -35,12 +44,43 @@ const TYPE_COLORS: Record<string, string> = {
       </label>
     </div>
 
-    @if (roots().length === 0) {
+    @if (roots().length === 0 && sourceProviders().length === 0) {
       <div class="empty">
-        <p class="muted">No injector tree available.</p>
-        <p class="hint">DI inspection requires Angular 17+ with debug mode. The overlay collects injector data from the running app.</p>
+        <p class="muted">No DI data found.</p>
+        <p class="hint">No providers, injectables, or inject() calls found. Runtime tree requires Angular 17+ with the overlay connected.</p>
       </div>
-    } @else {
+    }
+
+    @if (roots().length === 0 && sourceProviders().length > 0) {
+      <p class="source-label">DI from source scan (static analysis):</p>
+      <div class="source-providers">
+        @for (group of groupedProviders(); track group.type) {
+          <div class="provider-group">
+            <h3>{{ group.label }} ({{ group.items.length }})</h3>
+            <div class="provider-list">
+              @for (p of group.items; track p.token + p.file + p.line) {
+                <div class="provider-card">
+                  <div class="provider-header">
+                    <span class="token">{{ p.token }}</span>
+                    @if (p.providedIn) {
+                      <span class="provided-in">providedIn: {{ p.providedIn }}</span>
+                    }
+                  </div>
+                  <div class="provider-meta">
+                    {{ p.file }}:{{ p.line }}
+                    @if (p.source !== 'class' && p.source !== 'providers array') {
+                      · as {{ p.source }}
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+    @if (roots().length > 0) {
       <div class="tree-container">
         @for (root of filteredRoots(); track root.injector.id) {
           <ng-container *ngTemplateOutlet="undefined" />
@@ -140,12 +180,22 @@ const TYPE_COLORS: Record<string, string> = {
     }
     td { padding: 8px 10px; border-bottom: 1px solid #1e1e22; }
     .token { font-family: monospace; color: #a78bfa; }
+    .source-label { font-size: 13px; color: #71717a; margin-bottom: 12px; }
+    .source-providers { display: flex; flex-direction: column; gap: 20px; }
+    .provider-group h3 { font-size: 13px; color: #71717a; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .provider-list { display: flex; flex-direction: column; gap: 6px; }
+    .provider-card { background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 10px 14px; }
+    .provider-header { display: flex; align-items: center; gap: 8px; }
+    .provider-header .token { font-size: 14px; font-weight: 500; }
+    .provided-in { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #14532d; color: #4ade80; }
+    .provider-meta { font-size: 11px; color: #52525b; margin-top: 4px; }
   `,
 })
 export class DiInspector {
   rpc = input<DevframeRpcClient | null>(null)
 
   roots = signal<InjectorNode[]>([])
+  sourceProviders = signal<SourceProvider[]>([])
   filter = signal('')
   hideEmpty = signal(false)
   selectedId = signal<string | null>(null)
@@ -168,10 +218,30 @@ export class DiInspector {
     return roots
   })
 
+  groupedProviders = computed(() => {
+    const all = this.sourceProviders()
+    const q = this.filter().toLowerCase()
+    const filtered = q ? all.filter((p) => p.token.toLowerCase().includes(q) || p.file.includes(q)) : all
+
+    const groups: { type: string; label: string; items: SourceProvider[] }[] = [
+      { type: 'root-provider', label: 'Root Providers (provide*)', items: [] },
+      { type: 'injectable', label: 'Injectable Services', items: [] },
+      { type: 'injection', label: 'inject() Calls', items: [] },
+      { type: 'provider', label: 'Component Providers', items: [] },
+    ]
+    for (const p of filtered) {
+      const group = groups.find((g) => g.type === p.type)
+      if (group) group.items.push(p)
+    }
+    return groups.filter((g) => g.items.length > 0)
+  })
+
   constructor() {
     effect(() => {
       const client = this.rpc()
-      if (client) this.loadInjectorTree(client)
+      if (!client) return
+      this.loadInjectorTree(client)
+      this.loadSourceProviders(client)
     })
   }
 
@@ -183,6 +253,16 @@ export class DiInspector {
     state.on('updated', (next: any) => {
       if (next?.roots) this.roots.set(next.roots)
     })
+  }
+
+  async loadSourceProviders(client: DevframeRpcClient) {
+    const my = client.scope('ng-devtools')
+    try {
+      const result = (await my.rpc.call('get-providers')) as SourceProvider[]
+      this.sourceProviders.set(result)
+    } catch {
+      // RPC not available
+    }
   }
 
   select(node: InjectorNode) {

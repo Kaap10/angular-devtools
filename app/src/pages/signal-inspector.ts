@@ -22,6 +22,14 @@ interface SignalGraph {
   componentSelector?: string
 }
 
+interface SourceSignal {
+  name: string
+  kind: string
+  file: string
+  line: number
+  component?: string
+}
+
 const KIND_COLORS: Record<string, string> = {
   signal: '#a78bfa',
   computed: '#60a5fa',
@@ -30,6 +38,15 @@ const KIND_COLORS: Record<string, string> = {
   template: '#94a3b8',
   afterRenderEffectPhase: '#f472b6',
   childSignalProp: '#c084fc',
+  'input (signal)': '#f59e0b',
+  'input.required (signal)': '#f59e0b',
+  'output (signal)': '#ec4899',
+  'model (signal)': '#14b8a6',
+  'viewChild (signal)': '#8b5cf6',
+  'viewChildren (signal)': '#8b5cf6',
+  'contentChild (signal)': '#6366f1',
+  'contentChildren (signal)': '#6366f1',
+  resource: '#06b6d4',
   unknown: '#71717a',
 }
 
@@ -47,12 +64,34 @@ const KIND_COLORS: Record<string, string> = {
       <span class="label">Component: {{ graph()?.componentSelector ?? '—' }}</span>
     </div>
 
-    @if (!graph()) {
+    @if (!graph() && sourceSignals().length === 0) {
       <div class="empty">
-        <p class="muted">No signal graph available.</p>
-        <p class="hint">Signal inspection requires Angular 19+ with debug mode. The overlay collects the graph from the running app.</p>
+        <p class="muted">No signals found.</p>
+        <p class="hint">No signal(), computed(), effect() calls found in source. Runtime graph requires Angular 19+ with the overlay connected.</p>
       </div>
-    } @else {
+    }
+
+    @if (!graph() && sourceSignals().length > 0) {
+      <p class="source-label">Signals from source scan (static analysis):</p>
+      <div class="nodes">
+        @for (sig of filteredSourceSignals(); track sig.name + sig.file + sig.line) {
+          <div class="node-card">
+            <div class="node-header">
+              <span class="kind-badge" [style.background]="kindColor(sig.kind)">{{ sig.kind }}</span>
+              <span class="node-label">{{ sig.name }}</span>
+            </div>
+            <div class="node-meta">
+              {{ sig.file }}:{{ sig.line }}
+              @if (sig.component) {
+                · in &lt;{{ sig.component }}&gt;
+              }
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+    @if (graph()) {
       <div class="legend">
         @for (entry of kindLegend; track entry.kind) {
           <span class="legend-item">
@@ -133,6 +172,7 @@ const KIND_COLORS: Record<string, string> = {
     .empty { text-align: center; padding: 48px 16px; }
     .muted { color: #71717a; font-size: 14px; }
     .hint { color: #52525b; font-size: 12px; margin-top: 8px; }
+    .source-label { font-size: 13px; color: #71717a; margin-bottom: 12px; }
     .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
     .legend-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #a1a1aa; }
     .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -171,6 +211,7 @@ export class SignalInspector {
   rpc = input<DevframeRpcClient | null>(null)
 
   graph = signal<SignalGraph | null>(null)
+  sourceSignals = signal<SourceSignal[]>([])
   filter = signal('')
   selectedNode = signal<SignalNode | null>(null)
 
@@ -185,11 +226,18 @@ export class SignalInspector {
       : g.nodes
   })
 
+  filteredSourceSignals = computed(() => {
+    const q = this.filter().toLowerCase()
+    const all = this.sourceSignals()
+    return q ? all.filter((s) => s.name.toLowerCase().includes(q) || s.kind.includes(q) || s.file.includes(q)) : all
+  })
+
   constructor() {
     effect(() => {
       const client = this.rpc()
       if (!client) return
       this.loadSignalGraph(client)
+      this.loadSourceSignals(client)
     })
   }
 
@@ -201,6 +249,16 @@ export class SignalInspector {
     state.on('updated', (next: any) => {
       if (next?.graph) this.graph.set(next.graph)
     })
+  }
+
+  async loadSourceSignals(client: DevframeRpcClient) {
+    const my = client.scope('ng-devtools')
+    try {
+      const result = (await my.rpc.call('get-signals')) as SourceSignal[]
+      this.sourceSignals.set(result)
+    } catch {
+      // RPC not available
+    }
   }
 
   selectNode(node: SignalNode) {
