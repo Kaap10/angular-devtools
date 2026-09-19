@@ -35,7 +35,7 @@ type Tab = 'dashboard' | 'components' | 'routes' | 'signals' | 'injectors'
     </header>
     <main>
       @switch (tab()) {
-        @case ('dashboard') { <app-dashboard [rpc]="rpc()" /> }
+        @case ('dashboard') { <app-dashboard [rpc]="rpc()" (navigate)="switchTab($event)" /> }
         @case ('components') { <app-component-tree [rpc]="rpc()" /> }
         @case ('routes') { <app-route-inspector [rpc]="rpc()" /> }
         @case ('signals') { <app-signal-inspector [rpc]="rpc()" /> }
