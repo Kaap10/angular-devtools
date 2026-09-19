@@ -1,59 +1,272 @@
-# AngularDevtools
+# Angular DevTools
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.1.8.
+Inspect Angular component trees, signals, dependency injection, and routes — at dev time, build time, or through a coding agent. Built with [Devframe](https://devfra.me) so the same tool runs as an embedded panel, standalone CLI, static report, MCP server, or Chrome DevTools extension.
 
-## Development server
+## Features
 
-To start a local development server, run:
+- **Component inspector** — discover components, inputs, outputs, and source files
+- **Signal graph** — visualize signal, computed, linkedSignal, effect nodes and their dependency edges (Angular 19+)
+- **DI inspector** — browse the injector hierarchy (element and environment) with providers at each level (Angular 17+)
+- **Route inspector** — list registered routes from source
+- **Build metadata** — Angular version, TypeScript version, SSR status
+- **Agent-native** — all inspectors exposed as MCP tools and resources
+- **Deep linking** — URL hash navigates to a specific tab (`#tab=signals`)
+- **Page overlay** — highlights components in the running app
 
-```bash
-ng serve
+## Install
+
+```sh
+npm install @santoshyadavdev/ng-devtools devframe
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+For MCP agent support, also install the optional peer:
 
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
+```sh
+npm install @devframes/agentic
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+## How to Use
 
-```bash
-ng generate --help
+### Embedded in an Angular app (Express SSR)
+
+Add the devframe middleware to your Express server:
+
+```ts
+// server.ts
+import { initDevframe } from 'devframe/initiate'
+import ngDevtools from '@santoshyadavdev/ng-devtools/devframe'
+
+const devtools = initDevframe(ngDevtools, { base: '/__ng-devtools/' })
+app.use(devtools.nodeMiddleware)
 ```
 
-## Building
+Open `http://localhost:4000/__ng-devtools/` to see the devtools UI.
 
-To build the project run:
+### Standalone CLI
 
-```bash
-ng build
+```sh
+# Dev server with live RPC
+npx @santoshyadavdev/ng-devtools dev
+
+# Static report (offline HTML)
+npx @santoshyadavdev/ng-devtools build --outDir dist-report
+
+# MCP server for coding agents
+npx @santoshyadavdev/ng-devtools mcp
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+### MCP Server for Coding Agents
 
-## Running unit tests
+**Claude Desktop** — add to `claude_desktop_config.json`:
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
+```json
+{
+  "mcpServers": {
+    "ng-devtools": {
+      "command": "npx",
+      "args": ["@santoshyadavdev/ng-devtools", "mcp"]
+    }
+  }
+}
 ```
 
-## Running end-to-end tests
+**VS Code** — add to `.vscode/mcp.json`:
 
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
+```json
+{
+  "servers": {
+    "ng-devtools": {
+      "command": "npx",
+      "args": ["@santoshyadavdev/ng-devtools", "mcp"]
+    }
+  }
+}
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+When embedded in Express, the MCP endpoint is also available over HTTP at `/__ng-devtools/__mcp`.
 
-## Additional Resources
+#### Agent Tools
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+| Tool | Description |
+|---|---|
+| `ng-devtools:get-routes` | List Angular routes from source |
+| `ng-devtools:get-components` | Discover components, inputs, outputs |
+| `ng-devtools:build-meta` | Angular/TS versions, SSR status |
+| `ng-devtools:highlight` | Highlight a component in the page |
+| `ng-devtools:inspect-signals` | Signal graph for a component |
+| `ng-devtools:inspect-providers` | DI providers and resolution path |
+
+#### Agent Resources
+
+| Resource | Content |
+|---|---|
+| `ng-devtools:component-tree` | Live component hierarchy |
+| `ng-devtools:signal-graph` | Signal dependency graph |
+| `ng-devtools:injector-tree` | DI injector hierarchy |
+
+### Vite DevTools Dock
+
+Mount as a dock panel inside Vite DevTools:
+
+```ts
+// vite.config.ts
+import { viteDevframeHub } from '@devframes/vite/hub'
+import { createUi } from '@devframes/hub-ui'
+import ngDevtools from '@santoshyadavdev/ng-devtools/devframe'
+
+export default defineConfig({
+  plugins: [
+    viteDevframeHub({
+      devframes: [ngDevtools],
+      ui: createUi({ branding: { productName: 'Angular DevTools' } }),
+    }),
+  ],
+})
+```
+
+### Chrome DevTools Extension
+
+See the [Chrome Extension](#chrome-devtools-extension-1) section below for how to package this as a Chrome extension.
+
+### Browser Overlay
+
+The overlay runs inside the user's Angular page and collects live component, signal, and DI data:
+
+```ts
+import { initOverlay } from '@santoshyadavdev/ng-devtools/overlay'
+
+const dispose = await initOverlay()
+```
+
+## Development
+
+```sh
+# Install dependencies
+pnpm install
+
+# Dev server for the devtools UI (with live RPC)
+pnpm devtools:dev
+
+# Build the devtools UI SPA
+pnpm devtools:build
+
+# Build assets into the publishable package
+pnpm devtools:build-pkg
+
+# Run the Angular host app
+pnpm start
+```
+
+## Publishing
+
+The devtool ships as two npm packages:
+
+| Package | Contents |
+|---|---|
+| `@santoshyadavdev/ng-devtools` | Node-side logic, RPC, CLI, overlay |
+| `@santoshyadavdev/ng-devtools-assets` | Built SPA (served at runtime via CDN or local install) |
+
+```sh
+# Build assets, then publish both
+pnpm devtools:publish
+```
+
+Keep versions in sync — the tool references the assets package by exact version.
+
+## Chrome DevTools Extension
+
+To distribute this as a Chrome DevTools extension, you need a thin Chrome extension shell that opens the devtools UI in a DevTools panel. The built SPA already works standalone — the extension just embeds it.
+
+### 1. Create the extension scaffold
+
+Create an `extension/` directory:
+
+```
+extension/
+  manifest.json
+  devtools.html
+  devtools.js
+  panel.html
+```
+
+### 2. `extension/manifest.json`
+
+```json
+{
+  "manifest_version": 3,
+  "name": "Angular DevTools",
+  "version": "0.0.1",
+  "description": "Inspect Angular components, signals, DI, and routes.",
+  "devtools_page": "devtools.html",
+  "permissions": ["scripting"],
+  "host_permissions": ["<all_urls>"],
+  "icons": {
+    "128": "icon-128.png"
+  }
+}
+```
+
+### 3. `extension/devtools.html` and `extension/devtools.js`
+
+```html
+<!-- devtools.html -->
+<!doctype html>
+<script src="devtools.js"></script>
+```
+
+```js
+// devtools.js — creates the panel in Chrome DevTools
+chrome.devtools.panels.create(
+  'Angular',
+  'icon-128.png',
+  'panel.html'
+)
+```
+
+### 4. `extension/panel.html`
+
+This is where the built SPA loads. Copy the built assets (`dist/devtools-ui/`) into the extension and point `panel.html` at the SPA's `index.html`:
+
+```html
+<!-- panel.html — the devtools SPA loads here -->
+<!doctype html>
+<html>
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <iframe src="ui/index.html" style="width:100%;height:100vh;border:none;"></iframe>
+  </body>
+</html>
+```
+
+### 5. Build the extension
+
+```sh
+# Build the devtools SPA
+pnpm devtools:build
+
+# Copy into the extension
+mkdir -p extension/ui
+cp -r dist/devtools-ui/* extension/ui/
+```
+
+### 6. Load in Chrome
+
+1. Go to `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** → select the `extension/` directory
+4. Open DevTools on any Angular app → the **Angular** panel appears
+
+### 7. Publish to Chrome Web Store
+
+1. Zip the `extension/` directory
+2. Go to the [Chrome Developer Dashboard](https://chrome.google.com/webstore/devconsole)
+3. Click **New item** → upload the zip
+4. Fill in the listing details and submit for review
+
+### Connecting the extension to the running app
+
+The extension panel loads the SPA in static mode by default. To connect it to a live dev server for real-time RPC, the extension's content script or background service worker needs to detect the devframe's `__connection.json` on the inspected page and pass the connection to the panel. This is the same pattern the official Angular DevTools Chrome extension uses — a content script bridges the inspected page and the DevTools panel via `chrome.runtime.connect`.
+
+## License
+
+MIT

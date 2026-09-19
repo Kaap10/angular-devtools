@@ -7,7 +7,7 @@ import {
 import express from 'express';
 import { join } from 'node:path';
 import { initDevframe } from 'devframe/initiate';
-import ngDevtools from './node/devframe.js';
+import ngDevtools from '@santoshyadavdev/ng-devtools/devframe';
 
 const browserDistFolder = join(import.meta.dirname, '../browser');
 

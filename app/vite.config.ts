@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import angular from '@analogjs/vite-plugin-angular'
 import { devframeViteBridge } from '@devframes/vite/single'
-import ngDevtools from '../src/node/devframe.js'
+import ngDevtools from '@santoshyadavdev/ng-devtools/devframe'
 
 export default defineConfig({
   base: './',

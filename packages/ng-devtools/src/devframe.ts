@@ -1,9 +1,9 @@
 import type { RemoteAssets } from 'devframe'
 import { defineDevframe } from 'devframe'
-import { getRoutes } from './rpc/get-routes.js'
-import { getComponents } from './rpc/get-components.js'
-import { getBuildMeta } from './rpc/build-meta.js'
-import type {} from './types.js'
+import { getRoutes } from './rpc/get-routes.ts'
+import { getComponents } from './rpc/get-components.ts'
+import { getBuildMeta } from './rpc/build-meta.ts'
+import type {} from './types.ts'
 
 import pkg from '../package.json' with { type: 'json' }
 

@@ -88,7 +88,8 @@ export class App implements OnInit, OnDestroy {
       this.tab.set(hashTab as Tab)
     }
 
-    connectDevframe({ baseURL: '/__ng-devtools/' }).then((client) => {
+    const baseURL = detectBaseURL()
+    connectDevframe(baseURL ? { baseURL } : {}).then((client) => {
       this.rpc.set(client)
       this.connected.set(true)
       client.events.on('connection:status', (status) => {
@@ -105,4 +106,14 @@ export class App implements OnInit, OnDestroy {
     this.tab.set(id)
     history.replaceState(history.state, '', `#tab=${id}`)
   }
+}
+
+// Chrome extension passes ?baseURL=...; embedded uses /__ng-devtools/; standalone uses default
+function detectBaseURL(): string | undefined {
+  const params = new URLSearchParams(location.search)
+  const fromQuery = params.get('baseURL')
+  if (fromQuery) return fromQuery
+
+  if (location.pathname.includes('__ng-devtools')) return undefined
+  return '/__ng-devtools/'
 }
