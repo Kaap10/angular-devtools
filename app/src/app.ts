@@ -1,0 +1,108 @@
+import { Component, signal, OnInit, OnDestroy } from '@angular/core'
+import { connectDevframe, type DevframeRpcClient } from 'devframe/client'
+import { Dashboard } from './pages/dashboard'
+import { ComponentTree } from './pages/component-tree'
+import { RouteInspector } from './pages/route-inspector'
+import { SignalInspector } from './pages/signal-inspector'
+import { DiInspector } from './pages/di-inspector'
+
+type Tab = 'dashboard' | 'components' | 'routes' | 'signals' | 'injectors'
+
+@Component({
+  selector: 'app-root',
+  imports: [Dashboard, ComponentTree, RouteInspector, SignalInspector, DiInspector],
+  template: `
+    <header>
+      <div class="brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+          <line x1="12" y1="22" x2="12" y2="15.5"/>
+          <polyline points="22 8.5 12 15.5 2 8.5"/>
+        </svg>
+        <span>Angular DevTools</span>
+      </div>
+      <nav>
+        @for (t of tabs; track t.id) {
+          <button
+            [class.active]="tab() === t.id"
+            (click)="switchTab(t.id)"
+          >{{ t.label }}</button>
+        }
+      </nav>
+      <span class="status" [class.connected]="connected()">
+        {{ connected() ? 'Connected' : 'Connecting…' }}
+      </span>
+    </header>
+    <main>
+      @switch (tab()) {
+        @case ('dashboard') { <app-dashboard [rpc]="rpc()" /> }
+        @case ('components') { <app-component-tree [rpc]="rpc()" /> }
+        @case ('routes') { <app-route-inspector [rpc]="rpc()" /> }
+        @case ('signals') { <app-signal-inspector [rpc]="rpc()" /> }
+        @case ('injectors') { <app-di-inspector [rpc]="rpc()" /> }
+      }
+    </main>
+  `,
+  styles: `
+    :host { display: flex; flex-direction: column; height: 100vh; }
+    header {
+      display: flex; align-items: center; gap: 16px;
+      padding: 8px 16px;
+      background: #18181b; border-bottom: 1px solid #27272a;
+    }
+    .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #a78bfa; }
+    nav { display: flex; gap: 4px; flex: 1; }
+    nav button {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: transparent; color: #a1a1aa; cursor: pointer;
+      font-size: 13px; transition: all 0.15s;
+    }
+    nav button:hover { background: #27272a; color: #e4e4e7; }
+    nav button.active { background: #3f3f46; color: #fff; }
+    .status {
+      font-size: 12px; padding: 3px 10px; border-radius: 99px;
+      background: #44403c; color: #a8a29e;
+    }
+    .status.connected { background: #14532d; color: #4ade80; }
+    main { flex: 1; overflow: auto; padding: 16px; }
+  `,
+})
+export class App implements OnInit, OnDestroy {
+  readonly tabs = [
+    { id: 'dashboard' as Tab, label: 'Dashboard' },
+    { id: 'components' as Tab, label: 'Components' },
+    { id: 'routes' as Tab, label: 'Routes' },
+    { id: 'signals' as Tab, label: 'Signals' },
+    { id: 'injectors' as Tab, label: 'Injectors' },
+  ]
+
+  tab = signal<Tab>('dashboard')
+  rpc = signal<DevframeRpcClient | null>(null)
+  connected = signal(false)
+
+  ngOnInit() {
+    // Deep link: read tab from hash
+    const params = new URLSearchParams(location.hash.replace(/^#/, ''))
+    const hashTab = params.get('tab')
+    if (hashTab && this.tabs.some((t) => t.id === hashTab)) {
+      this.tab.set(hashTab as Tab)
+    }
+
+    connectDevframe({ baseURL: '/__ng-devtools/' }).then((client) => {
+      this.rpc.set(client)
+      this.connected.set(true)
+      client.events.on('connection:status', (status) => {
+        this.connected.set(status === 'connected')
+      })
+    })
+  }
+
+  ngOnDestroy() {
+    // cleanup handled by devframe client
+  }
+
+  switchTab(id: Tab) {
+    this.tab.set(id)
+    history.replaceState(history.state, '', `#tab=${id}`)
+  }
+}

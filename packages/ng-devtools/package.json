@@ -1,0 +1,39 @@
+{
+  "name": "@santoshyadavdev/ng-devtools",
+  "version": "0.0.1",
+  "description": "Angular DevTools — inspect components, signals, DI, and routes. Runs standalone, embedded, or over MCP.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "ng-devtools": "./bin.mjs"
+  },
+  "exports": {
+    ".": "./src/devframe.ts",
+    "./devframe": "./src/devframe.ts",
+    "./overlay": "./src/overlay.ts"
+  },
+  "files": [
+    "src",
+    "bin.mjs"
+  ],
+  "keywords": [
+    "angular",
+    "devtools",
+    "devframe",
+    "signals",
+    "dependency-injection",
+    "mcp"
+  ],
+  "dependencies": {
+    "devframe": "^1.0.0",
+    "valibot": "^1.5.0"
+  },
+  "peerDependencies": {
+    "@devframes/agentic": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@devframes/agentic": {
+      "optional": true
+    }
+  }
+}
