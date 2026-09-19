@@ -1,11 +1,11 @@
 import type { RemoteAssets } from 'devframe'
 import { defineDevframe } from 'devframe'
-import { getRoutes } from './rpc/get-routes.ts'
-import { getComponents } from './rpc/get-components.ts'
-import { getBuildMeta } from './rpc/build-meta.ts'
-import { getSignals } from './rpc/get-signals.ts'
-import { getProviders } from './rpc/get-providers.ts'
-import type {} from './types.ts'
+import { getRoutes } from './rpc/get-routes.js'
+import { getComponents } from './rpc/get-components.js'
+import { getBuildMeta } from './rpc/build-meta.js'
+import { getSignals } from './rpc/get-signals.js'
+import { getProviders } from './rpc/get-providers.js'
+import type {} from './types.js'
 
 import pkg from '../package.json' with { type: 'json' }
 
@@ -138,7 +138,7 @@ const ngDevtools = defineDevframe({
       description: 'Highlight a component in the running Angular app by its selector.',
       safety: 'action',
       handler: async (args: { selector: string }) => {
-        await ctx.rpc.invokeLocal('ng-devtools:select-component', args.selector)
+        await ctx.rpc.invokeLocal('ng-devtools:select-component' as any, args.selector)
         void my.rpc.broadcast({ method: 'highlight-in-page', args: [args.selector], optional: true })
         return { markdown: `Highlighted \`${args.selector}\` in the page overlay.` }
       },

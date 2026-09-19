@@ -28,16 +28,16 @@ export const getBuildMeta = defineRpcFunction({
       const pkg = readJson(join(ctx.cwd, 'package.json'))
       const angularJson = readJson(join(ctx.cwd, 'angular.json'))
 
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+      const deps = { ...pkg['dependencies'], ...pkg['devDependencies'] }
       const angularVersion = (deps['@angular/core'] ?? 'unknown').replace(/^\^|~/, '')
       const typescript = (deps['typescript'] ?? 'unknown').replace(/^\^|~/, '')
 
-      const defaultProject = angularJson?.defaultProject
-        ?? Object.keys(angularJson?.projects ?? {})[0]
-        ?? pkg.name
+      const defaultProject = angularJson?.['defaultProject']
+        ?? Object.keys(angularJson?.['projects'] ?? {})[0]
+        ?? pkg['name']
         ?? 'unknown'
 
-      const projectConfig = angularJson?.projects?.[defaultProject]
+      const projectConfig = angularJson?.['projects']?.[defaultProject]
       const hasSsr = !!(projectConfig?.architect?.build?.options?.ssr
         || projectConfig?.architect?.build?.options?.server)
 
