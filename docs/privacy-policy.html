@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Angular DevTools — Privacy Policy</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; color: #1a1a1a; line-height: 1.7; max-width: 720px; margin: 0 auto; padding: 48px 24px; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    .updated { color: #666; font-size: 14px; margin-bottom: 32px; }
+    h2 { font-size: 20px; margin-top: 32px; margin-bottom: 8px; }
+    p, ul { margin-bottom: 16px; }
+    ul { padding-left: 24px; }
+    a { color: #7c3aed; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: September 19, 2026</p>
+
+  <p>Angular DevTools ("the Extension") is a browser extension that helps developers inspect Angular applications. This privacy policy explains what data the Extension accesses and how it is used.</p>
+
+  <h2>Data Collection</h2>
+  <p>The Extension does <strong>not</strong> collect, store, transmit, or share any personal data or browsing data. Specifically:</p>
+  <ul>
+    <li>No personal information is collected</li>
+    <li>No browsing history is recorded</li>
+    <li>No cookies or tracking mechanisms are used</li>
+    <li>No analytics or telemetry data is sent</li>
+    <li>No data is transmitted to any external server</li>
+  </ul>
+
+  <h2>What the Extension Accesses</h2>
+  <p>The Extension accesses the following information <strong>only on the page you are actively inspecting</strong> via Chrome DevTools:</p>
+  <ul>
+    <li><strong>Angular framework detection</strong> — checks for the <code>ng-version</code> HTML attribute and the <code>window.ng</code> global to determine if the page uses Angular</li>
+    <li><strong>Angular debug APIs</strong> — reads component trees, signal graphs, dependency injection hierarchies, and route configurations using Angular's built-in debug utilities (available only in development builds)</li>
+    <li><strong>Localhost communication</strong> — communicates with a devframe server running on <code>localhost</code> on the developer's own machine for live inspection data</li>
+  </ul>
+  <p>All data processing happens entirely within your browser and your local machine. No information ever leaves your device.</p>
+
+  <h2>Host Permissions</h2>
+  <p>The Extension requests host permissions (<code>&lt;all_urls&gt;</code>) solely to inject a lightweight content script that detects Angular on any page. The content script only checks for the presence of Angular and does not read or modify page content.</p>
+
+  <h2>Data Storage</h2>
+  <p>The Extension does not persist any data between sessions. All inspection data exists only in memory while the DevTools panel is open and is discarded when the panel is closed.</p>
+
+  <h2>Third-Party Services</h2>
+  <p>The Extension does not use any third-party services, APIs, or SDKs.</p>
+
+  <h2>Children's Privacy</h2>
+  <p>The Extension is a developer tool and is not directed at children under 13. It does not knowingly collect any information from anyone.</p>
+
+  <h2>Changes to This Policy</h2>
+  <p>If this privacy policy is updated, the revised version will be posted at this URL with an updated date.</p>
+
+  <h2>Contact</h2>
+  <p>For questions about this privacy policy, open an issue at <a href="https://github.com/santoshyadavdev/angular-devtools/issues">github.com/santoshyadavdev/angular-devtools</a>.</p>
+
+  <h2>Open Source</h2>
+  <p>The Extension is open source. You can review the complete source code at <a href="https://github.com/santoshyadavdev/angular-devtools">github.com/santoshyadavdev/angular-devtools</a>.</p>
+</body>
+</html>
