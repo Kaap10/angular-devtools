@@ -137,6 +137,13 @@ const ngDevtools = defineDevframe({
       id: 'ng-devtools:highlight',
       description: 'Highlight a component in the running Angular app by its selector.',
       safety: 'action',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the component to highlight, e.g. app-root.' },
+        },
+        required: ['selector'],
+      },
       handler: async (args: { selector: string }) => {
         await ctx.rpc.invokeLocal('ng-devtools:select-component' as any, args.selector)
         void my.rpc.broadcast({ method: 'highlight-in-page', args: [args.selector], optional: true })
@@ -148,6 +155,13 @@ const ngDevtools = defineDevframe({
       id: 'ng-devtools:inspect-signals',
       description: 'Get the signal graph for a specific component by CSS selector. Returns signal nodes (signal, computed, linkedSignal, effect) and their dependency edges. Call this to understand reactive data flow before suggesting state changes.',
       safety: 'read',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the component to inspect, e.g. app-root.' },
+        },
+        required: ['selector'],
+      },
       handler: async (args: { selector: string }) => {
         try {
           const result = await my.rpc.broadcast({ method: 'get-signal-graph-for', args: [args.selector] })
@@ -163,6 +177,13 @@ const ngDevtools = defineDevframe({
       id: 'ng-devtools:inspect-providers',
       description: 'Get DI providers and the injector resolution path for a component by CSS selector. Call this to understand dependency injection before suggesting provider changes.',
       safety: 'read',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the component to inspect, e.g. app-root.' },
+        },
+        required: ['selector'],
+      },
       handler: async (args: { selector: string }) => {
         try {
           const result = await my.rpc.broadcast({ method: 'get-providers-for', args: [args.selector] })
