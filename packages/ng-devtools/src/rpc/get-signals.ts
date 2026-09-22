@@ -2,6 +2,7 @@ import { defineRpcFunction } from 'devframe';
 import * as v from 'valibot';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { lineAt, maskStrings, skipString, stripComments } from './source-scan.ts';
 
 const SignalEntrySchema = v.object({
   name: v.string(),
@@ -35,21 +36,40 @@ interface SignalEntry {
   component?: string;
 }
 
-const SIGNAL_PATTERNS: { pattern: RegExp; kind: string }[] = [
-  { pattern: /(\w+)\s*=\s*signal\s*[<(]/g, kind: 'signal' },
-  { pattern: /(\w+)\s*=\s*computed\s*\(/g, kind: 'computed' },
-  { pattern: /(\w+)\s*=\s*linkedSignal\s*[<(]/g, kind: 'linkedSignal' },
-  { pattern: /(\w+)\s*=\s*effect\s*\(/g, kind: 'effect' },
-  { pattern: /(\w+)\s*=\s*input\s*[<.(]/g, kind: 'input (signal)' },
-  { pattern: /(\w+)\s*=\s*input\.required\s*[<(]/g, kind: 'input.required (signal)' },
-  { pattern: /(\w+)\s*=\s*output\s*[<(]/g, kind: 'output (signal)' },
-  { pattern: /(\w+)\s*=\s*model\s*[<(]/g, kind: 'model (signal)' },
-  { pattern: /(\w+)\s*=\s*viewChild\s*[<.(]/g, kind: 'viewChild (signal)' },
-  { pattern: /(\w+)\s*=\s*viewChildren\s*[<(]/g, kind: 'viewChildren (signal)' },
-  { pattern: /(\w+)\s*=\s*contentChild\s*[<.(]/g, kind: 'contentChild (signal)' },
-  { pattern: /(\w+)\s*=\s*contentChildren\s*[<(]/g, kind: 'contentChildren (signal)' },
-  { pattern: /(\w+)\s*=\s*resource\s*[<(]/g, kind: 'resource' },
-];
+interface ClassScope {
+  start: number;
+  end: number;
+  component?: string;
+}
+
+const KINDS: Record<string, string> = {
+  signal: 'signal',
+  computed: 'computed',
+  linkedSignal: 'linkedSignal',
+  effect: 'effect',
+  resource: 'resource',
+  input: 'input (signal)',
+  output: 'output (signal)',
+  model: 'model (signal)',
+  viewChild: 'viewChild (signal)',
+  viewChildren: 'viewChildren (signal)',
+  contentChild: 'contentChild (signal)',
+  contentChildren: 'contentChildren (signal)',
+};
+
+// One pass over the file: `name = fn(` or `name = fn.required(`, with the
+// optional `.required` part of the same match so a required input is not also
+// reported as a plain input. The name may be a private field and may carry a
+// single line type annotation, as in `readonly total: Signal<number> =`. A
+// `this.` prefix is a declaration too, but any other member assignment, as in
+// `store.count = signal(0)`, is not, hence the lookbehind.
+const SIGNAL_CALL = new RegExp(
+  String.raw`(?<![\w$#.])(?:this\.)?(#?[$\w]+)\s*(?::[^=;\n]+)?=\s*(${Object.keys(KINDS).join('|')})(\.required)?\s*[<(]`,
+  'g',
+);
+
+// A decorator may put whitespace, or a line break, before its arguments.
+const DECORATOR = /@(?:Component|Directive)\s*\(/g;
 
 function scanSignals(dir: string, cwd: string): SignalEntry[] {
   const entries: SignalEntry[] = [];
@@ -79,30 +99,109 @@ function walk(dir: string, cwd: string, out: SignalEntry[]) {
     if (!item.endsWith('.ts') || item.endsWith('.spec.ts') || item.endsWith('.d.ts')) continue;
 
     try {
-      const content = readFileSync(full, 'utf-8');
-      const relPath = relative(cwd, full);
-      const lines = content.split('\n');
-
-      // Detect enclosing component
-      const componentMatch = content.match(/selector:\s*['"`]([^'"`]+)['"`]/);
-      const component = componentMatch?.[1];
-
-      for (const { pattern, kind } of SIGNAL_PATTERNS) {
-        pattern.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(content)) !== null) {
-          const lineNum = content.substring(0, match.index).split('\n').length;
-          out.push({
-            name: match[1],
-            kind,
-            file: relPath,
-            line: lineNum,
-            component,
-          });
-        }
-      }
+      out.push(...signalsIn(readFileSync(full, 'utf-8'), relative(cwd, full)));
     } catch {
       // skip
     }
   }
+}
+
+function signalsIn(content: string, relPath: string): SignalEntry[] {
+  const source = stripComments(content);
+  // A declaration quoted inside a template or a string is not code. Masking
+  // keeps the length, so offsets into the two strings stay interchangeable.
+  const code = maskStrings(source);
+  const scopes = classScopes(code, source);
+
+  const entries: SignalEntry[] = [];
+  SIGNAL_CALL.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SIGNAL_CALL.exec(code)) !== null) {
+    const at = match.index;
+    const [, name, fn, required] = match;
+    entries.push({
+      name,
+      kind: required ? `${fn}.required (signal)` : KINDS[fn],
+      file: relPath,
+      line: lineAt(code, at),
+      component: scopes.find((scope) => at >= scope.start && at < scope.end)?.component,
+    });
+  }
+  return entries;
+}
+
+/**
+ * The span of every class in the file, each with the selector of the
+ * `@Component` or `@Directive` decorating it, so that a signal is reported
+ * against the class that declares it rather than the first selector in the
+ * file.
+ */
+function classScopes(code: string, source: string): ClassScope[] {
+  const scopes: ClassScope[] = [];
+  const declaration = /\bclass\s+\w+/g;
+  let previousEnd = 0;
+  let match: RegExpExecArray | null;
+  // `code` has string contents masked out, so a class written inside a
+  // template cannot open a scope; `source` still holds the selector to read.
+  while ((match = declaration.exec(code)) !== null) {
+    const bodyStart = classBodyStart(code, match.index + match[0].length);
+    if (bodyStart === -1) break;
+    const end = matchDelimiter(code, bodyStart, '{', '}');
+    scopes.push({
+      start: match.index,
+      end,
+      component: decoratorSelector(
+        code.slice(previousEnd, match.index),
+        source.slice(previousEnd, match.index),
+      ),
+    });
+    previousEnd = end;
+    declaration.lastIndex = end;
+  }
+  return scopes;
+}
+
+/**
+ * The first `{` that opens the class body, skipping the braces a generic
+ * parameter list can hold, as in `class Panel<T extends { id: string }> {`.
+ */
+function classBodyStart(code: string, from: number): number {
+  let angle = 0;
+  for (let i = from; i < code.length; i++) {
+    const ch = code[i];
+    if (ch === '"' || ch === "'" || ch === '`') i = skipString(code, i);
+    else if (ch === '<') angle++;
+    else if (ch === '>' && angle > 0) angle--;
+    else if (ch === '{' && angle === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The selector of the last `@Component`/`@Directive` decorator in `code`, read
+ * out of `source` at the same offsets. Both the decorator and the `selector`
+ * key are found in the masked copy, so neither a decorator nor a `selector:`
+ * written inside a template can be picked up, and only the value is read from
+ * the unmasked copy, where it survives.
+ */
+function decoratorSelector(code: string, source: string): string | undefined {
+  let open = -1;
+  for (const match of code.matchAll(DECORATOR)) open = match.index + match[0].length - 1;
+  if (open === -1) return undefined;
+  const args = code.slice(open, matchDelimiter(code, open, '(', ')'));
+  const key = /\bselector\s*:\s*['"`]/.exec(args);
+  if (!key) return undefined;
+  const quote = open + key.index + key[0].length - 1;
+  return source.slice(quote + 1, skipString(source, quote));
+}
+
+function matchDelimiter(source: string, open: number, start: string, end: string): number {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '"' || ch === "'" || ch === '`') i = skipString(source, i);
+    else if (ch === start) depth++;
+    else if (ch === end && --depth === 0) return i;
+  }
+  return source.length;
 }
