@@ -4,11 +4,13 @@ Inspect Angular component trees, signals, dependency injection, and routes — a
 
 ## Features
 
-- **Component inspector** — discover components, inputs, outputs, and source files
+- **Component inspector** — discover components, inputs, outputs, and source files; view injected providers per component
 - **Signal graph** — visualize signal, computed, linkedSignal, effect nodes and their dependency edges (Angular 19+)
 - **DI inspector** — browse the injector hierarchy (element and environment) with providers at each level (Angular 17+)
 - **Route inspector** — list registered routes from source
+- **NgRx Store inspector** — detect `@ngrx/store` (actions, reducers, effects, selectors) and `@ngrx/signals` (`signalStore`, `signalState`, `signalMethod`) patterns from source; live state & action log via Redux DevTools protocol
 - **Build metadata** — Angular version, TypeScript version, SSR status
+- **In-page popup** — floating devtools panel with dock modes (float, bottom, right), drag, resize, and localStorage persistence
 - **Agent-native** — all inspectors exposed as MCP tools and resources
 - **Deep linking** — URL hash navigates to a specific tab (`#tab=signals`)
 - **Page overlay** — highlights components in the running app
@@ -95,14 +97,16 @@ When embedded in Express, the MCP endpoint is also available over HTTP at `/__ng
 | `ng-devtools:highlight`         | Highlight a component in the page    |
 | `ng-devtools:inspect-signals`   | Signal graph for a component         |
 | `ng-devtools:inspect-providers` | DI providers and resolution path     |
+| `ng-devtools:get-ngrx-store`    | Scan source for NgRx store patterns  |
 
 #### Agent Resources
 
-| Resource                     | Content                  |
-| ---------------------------- | ------------------------ |
-| `ng-devtools:component-tree` | Live component hierarchy |
-| `ng-devtools:signal-graph`   | Signal dependency graph  |
-| `ng-devtools:injector-tree`  | DI injector hierarchy    |
+| Resource                     | Content                      |
+| ---------------------------- | ---------------------------- |
+| `ng-devtools:component-tree` | Live component hierarchy     |
+| `ng-devtools:signal-graph`   | Signal dependency graph      |
+| `ng-devtools:injector-tree`  | DI injector hierarchy        |
+| `ng-devtools:ngrx-store`     | Live NgRx state & action log |
 
 ### Vite DevTools Dock
 
@@ -130,13 +134,35 @@ See the [Chrome Extension](#chrome-devtools-extension-1) section below for how t
 
 ### Browser Overlay
 
-The overlay runs inside the user's Angular page and collects live component, signal, and DI data:
+The overlay runs inside the user's Angular page and collects live component, signal, DI, and NgRx data:
 
 ```ts
 import { initOverlay } from '@santoshyadavdev/ng-devtools/overlay';
 
 const dispose = await initOverlay();
 ```
+
+### In-Page Popup
+
+The devtools can appear as a floating popup directly on your page — no browser extension needed:
+
+```ts
+import { createDevtoolsPopup } from '@santoshyadavdev/ng-devtools/popup';
+
+createDevtoolsPopup();
+```
+
+This adds a purple FAB button (bottom-right) that opens the full devtools UI in an iframe. Supports three dock modes (float, bottom, right), dragging, resizing, and persists position via localStorage. The popup is automatically loaded in development when using the demo app.
+
+## Demo App
+
+The repository includes a demo Angular app (`src/`) that showcases the devtools with a product catalog built using `@ngrx/signals`:
+
+- **Home** — simple counter with `signal()`
+- **Products** — product list and detail pages powered by a `signalStore` with `withState`, `withComputed`, and `withMethods`
+- **About** — static page
+
+Run `pnpm start` and click the purple FAB button to open the devtools popup and see all inspectors in action.
 
 ## Development
 
@@ -153,7 +179,7 @@ pnpm devtools:build
 # Build assets into the publishable package
 pnpm devtools:build-pkg
 
-# Run the Angular host app
+# Run the Angular host app (includes in-page devtools popup)
 pnpm start
 ```
 
@@ -163,7 +189,7 @@ The devtool ships as two npm packages:
 
 | Package                               | Contents                                               |
 | ------------------------------------- | ------------------------------------------------------ |
-| `@santoshyadavdev/ng-devtools`        | Node-side logic, RPC, CLI, overlay                     |
+| `@santoshyadavdev/ng-devtools`        | Node-side logic, RPC, CLI, overlay, popup              |
 | `@santoshyadavdev/ng-devtools-assets` | Built SPA (served at runtime via CDN or local install) |
 
 ```sh
