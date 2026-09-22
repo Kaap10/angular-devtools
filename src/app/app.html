@@ -1,5 +1,15 @@
-<nav>
-  <a routerLink="/">Home</a>
-  <a routerLink="/about">About Us</a>
+<nav class="navbar">
+  <a class="brand" routerLink="/">Angular DevTools</a>
+  <div class="nav-links">
+    <a
+      routerLink="/"
+      routerLinkActive="active"
+      ariaCurrentWhenActive="page"
+      [routerLinkActiveOptions]="{ exact: true }"
+      >Home</a
+    >
+    <a routerLink="/products" routerLinkActive="active" ariaCurrentWhenActive="page">Products</a>
+    <a routerLink="/about" routerLinkActive="active" ariaCurrentWhenActive="page">About</a>
+  </div>
 </nav>
 <router-outlet />
