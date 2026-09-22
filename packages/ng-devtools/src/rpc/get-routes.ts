@@ -61,14 +61,14 @@ function findRouteFiles(
       const content = readFileSync(full, 'utf-8')
       const relPath = relative(cwd, full)
 
-      for (const match of content.matchAll(/path:\s*['"`]([^'"`]*)['"`]/g)) {
-        const after = content.slice(match.index!)
-        const componentMatch = after.match(/(?:component|loadComponent).*?(\w+)/)
-        const hasChildren = /children\s*:\s*\[/.test(after.slice(0, 200))
+      for (const body of objectLiterals(stripComments(content))) {
+        const props = topLevelProps(body)
+        const path = props.get('path')?.match(/^['"`]([^'"`]*)['"`]$/)?.[1]
+        if (path === undefined) continue
         routes.push({
-          path: match[1],
-          component: componentMatch?.[1],
-          hasChildren,
+          path,
+          component: routeComponent(props),
+          hasChildren: props.has('children'),
           file: relPath,
         })
       }
@@ -76,4 +76,95 @@ function findRouteFiles(
       // skip unreadable files
     }
   }
+}
+
+function routeComponent(props: Map<string, string>): string | undefined {
+  const eager = props.get('component')?.match(/^(\w+)/)?.[1]
+  if (eager) return eager
+  return props.get('loadComponent')?.match(/\.then\(\s*\(?\s*(\w+)\s*\)?\s*=>\s*\1\.(\w+)/)?.[2]
+}
+
+type Bracket = { ch: string; at: number; routeArray: boolean; routeObject: boolean }
+
+// An array holds routes when it is the route configuration itself (a top-level
+// array, or one passed to provideRouter/forRoot/forChild) or a `children` array.
+// Any other array is metadata, so objects inside it are never routes.
+const ROUTE_ARRAY = /(?:\bchildren\s*:|\b(?:provideRouter|forRoot|forChild)\s*\()\s*$/
+
+function objectLiterals(source: string): string[] {
+  const spans: [number, number][] = []
+  const open: Bracket[] = []
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') i = skipString(source, i)
+    else if ('([{'.includes(ch)) {
+      const parent = open.at(-1)
+      open.push({
+        ch,
+        at: i,
+        routeArray: ch === '[' && (!parent || ROUTE_ARRAY.test(source.slice(Math.max(0, i - 64), i))),
+        routeObject: ch === '{' && parent?.ch === '[' && parent.routeArray,
+      })
+    }
+    else if (')]}'.includes(ch)) {
+      const closed = open.pop()
+      if (ch === '}' && closed?.routeObject) spans.push([closed.at, i])
+    }
+  }
+  return spans.sort((a, b) => a[0] - b[0]).map(([start, end]) => source.slice(start + 1, end))
+}
+
+function topLevelProps(body: string): Map<string, string> {
+  const props = new Map<string, string>()
+  const add = (text: string) => {
+    const prop = text.match(/^\s*(\w+)\s*:\s*([\s\S]*?)\s*$/)
+    if (prop) props.set(prop[1], prop[2])
+  }
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]
+    if (ch === '"' || ch === "'" || ch === '`') i = skipString(body, i)
+    else if ('([{'.includes(ch)) depth++
+    else if (')]}'.includes(ch)) depth--
+    else if (ch === ',' && depth === 0) {
+      add(body.slice(start, i))
+      start = i + 1
+    }
+  }
+  add(body.slice(start))
+  return props
+}
+
+function skipString(source: string, start: number): number {
+  for (let i = start + 1; i < source.length; i++) {
+    if (source[i] === '\\') i++
+    else if (source[i] === source[start]) return i
+  }
+  return source.length
+}
+
+function stripComments(source: string): string {
+  let out = ''
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const end = skipString(source, i)
+      out += source.slice(i, end + 1)
+      i = end
+    }
+    else if (source.startsWith('//', i)) {
+      const end = source.indexOf('\n', i)
+      i = (end === -1 ? source.length : end) - 1
+    }
+    else if (source.startsWith('/*', i)) {
+      const end = source.indexOf('*/', i + 2)
+      i = end === -1 ? source.length : end + 1
+      out += ' '
+    }
+    else {
+      out += ch
+    }
+  }
+  return out
 }
