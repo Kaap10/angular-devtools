@@ -1,46 +1,46 @@
-import { connectDevframe } from 'devframe/client'
+import { connectDevframe } from 'devframe/client';
 
-let highlightEl: HTMLElement | null = null
+let highlightEl: HTMLElement | null = null;
 
 export async function initOverlay() {
-  const rpc = await connectDevframe()
-  const my = rpc.scope('ng-devtools')
+  const rpc = await connectDevframe();
+  const my = rpc.scope('ng-devtools');
 
   async function pushTree() {
-    const tree = collectComponentTree()
-    await my.rpc.call('push-component-tree', tree)
+    const tree = collectComponentTree();
+    await my.rpc.call('push-component-tree', tree);
   }
 
   async function pushSignalGraph() {
-    const graph = collectSignalGraph()
-    if (graph) await my.rpc.call('push-signal-graph', graph)
+    const graph = collectSignalGraph();
+    if (graph) await my.rpc.call('push-signal-graph', graph);
   }
 
   async function pushInjectorTree() {
-    const tree = collectInjectorTree()
-    if (tree.length) await my.rpc.call('push-injector-tree', tree)
+    const tree = collectInjectorTree();
+    if (tree.length) await my.rpc.call('push-injector-tree', tree);
   }
 
-  pushTree()
-  pushSignalGraph()
-  pushInjectorTree()
+  pushTree();
+  pushSignalGraph();
+  pushInjectorTree();
 
   const interval = setInterval(() => {
-    pushTree()
-    pushSignalGraph()
-    pushInjectorTree()
-  }, 3000)
+    pushTree();
+    pushSignalGraph();
+    pushInjectorTree();
+  }, 3000);
 
   my.rpc.register({
     name: 'highlight-in-page',
     type: 'event',
     jsonSerializable: true,
     handler: (selector: string) => {
-      clearHighlight()
-      const el = document.querySelector(selector)
-      if (el instanceof HTMLElement) showHighlight(el)
+      clearHighlight();
+      const el = document.querySelector(selector);
+      if (el instanceof HTMLElement) showHighlight(el);
     },
-  })
+  });
 
   // On-demand signal graph for a specific component
   my.rpc.register({
@@ -48,11 +48,11 @@ export async function initOverlay() {
     type: 'query',
     jsonSerializable: true,
     handler: (selector: string) => {
-      const el = document.querySelector(selector)
-      if (!el) return null
-      return getSignalGraphForElement(el)
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      return getSignalGraphForElement(el);
     },
-  })
+  });
 
   // On-demand DI providers for a specific component
   my.rpc.register({
@@ -60,47 +60,47 @@ export async function initOverlay() {
     type: 'query',
     jsonSerializable: true,
     handler: (selector: string) => {
-      const el = document.querySelector(selector)
-      if (!el) return null
-      return getProvidersForElement(el)
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      return getProvidersForElement(el);
     },
-  })
+  });
 
   return () => {
-    clearInterval(interval)
-    clearHighlight()
-  }
+    clearInterval(interval);
+    clearHighlight();
+  };
 }
 
 function collectComponentTree() {
-  const nodes: ComponentTreeNode[] = []
-  const roots = document.querySelectorAll('[ng-version], [_nghost-ng-c]')
+  const nodes: ComponentTreeNode[] = [];
+  const roots = document.querySelectorAll('[ng-version], [_nghost-ng-c]');
 
   // Use Angular's debug utilities if available
-  const ng = (window as any).ng
+  const ng = (window as any).ng;
   if (ng?.getComponent) {
     for (const root of roots) {
-      walkAngularTree(root, nodes, ng)
+      walkAngularTree(root, nodes, ng);
     }
   } else {
     // Fallback: walk DOM for Angular component host elements
-    walkDom(document.body, nodes)
+    walkDom(document.body, nodes);
   }
 
-  return nodes
+  return nodes;
 }
 
 interface ComponentTreeNode {
-  id: string
-  selector: string
-  tagName: string
-  children: ComponentTreeNode[]
-  inputs?: Record<string, unknown>
+  id: string;
+  selector: string;
+  tagName: string;
+  children: ComponentTreeNode[];
+  inputs?: Record<string, unknown>;
 }
 
 function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: any) {
-  const component = ng.getComponent(el)
-  if (!component) return
+  const component = ng.getComponent(el);
+  if (!component) return;
 
   const node: ComponentTreeNode = {
     id: generateId(el),
@@ -108,18 +108,18 @@ function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: any) {
     tagName: el.tagName.toLowerCase(),
     children: [],
     inputs: tryGetInputs(component),
-  }
+  };
 
   for (const child of el.querySelectorAll(':scope > *')) {
-    walkAngularTree(child, node.children, ng)
+    walkAngularTree(child, node.children, ng);
   }
 
-  out.push(node)
+  out.push(node);
 }
 
 function walkDom(el: Element, out: ComponentTreeNode[]) {
-  const tagName = el.tagName.toLowerCase()
-  const isComponent = tagName.includes('-') || el.hasAttribute('_nghost-ng-c')
+  const tagName = el.tagName.toLowerCase();
+  const isComponent = tagName.includes('-') || el.hasAttribute('_nghost-ng-c');
 
   if (isComponent) {
     const node: ComponentTreeNode = {
@@ -127,49 +127,49 @@ function walkDom(el: Element, out: ComponentTreeNode[]) {
       selector: tagName,
       tagName,
       children: [],
-    }
+    };
     for (const child of el.children) {
-      walkDom(child, node.children)
+      walkDom(child, node.children);
     }
-    out.push(node)
+    out.push(node);
   } else {
     for (const child of el.children) {
-      walkDom(child, out)
+      walkDom(child, out);
     }
   }
 }
 
 function tryGetInputs(component: any): Record<string, unknown> | undefined {
   try {
-    const inputs: Record<string, unknown> = {}
+    const inputs: Record<string, unknown> = {};
     for (const key of Object.keys(component)) {
-      const val = component[key]
+      const val = component[key];
       if (typeof val === 'function' && val.name === 'signalValueFn') {
-        inputs[key] = val()
+        inputs[key] = val();
       } else if (typeof val !== 'function') {
-        inputs[key] = val
+        inputs[key] = val;
       }
     }
-    return Object.keys(inputs).length > 0 ? inputs : undefined
+    return Object.keys(inputs).length > 0 ? inputs : undefined;
   } catch {
-    return undefined
+    return undefined;
   }
 }
 
-let idCounter = 0
+let idCounter = 0;
 function generateId(el: Element) {
-  const existing = el.getAttribute('data-ng-devtools-id')
-  if (existing) return existing
-  const id = `ngdt-${++idCounter}`
-  el.setAttribute('data-ng-devtools-id', id)
-  return id
+  const existing = el.getAttribute('data-ng-devtools-id');
+  if (existing) return existing;
+  const id = `ngdt-${++idCounter}`;
+  el.setAttribute('data-ng-devtools-id', id);
+  return id;
 }
 
 // Highlight overlay
 function showHighlight(el: HTMLElement) {
-  clearHighlight()
-  const rect = el.getBoundingClientRect()
-  highlightEl = document.createElement('div')
+  clearHighlight();
+  const rect = el.getBoundingClientRect();
+  highlightEl = document.createElement('div');
   Object.assign(highlightEl.style, {
     position: 'fixed',
     top: `${rect.top}px`,
@@ -182,45 +182,45 @@ function showHighlight(el: HTMLElement) {
     pointerEvents: 'none',
     zIndex: '2147483647',
     transition: 'all 0.15s ease',
-  } satisfies Partial<CSSStyleDeclaration>)
-  document.body.appendChild(highlightEl)
-  setTimeout(clearHighlight, 2000)
+  } satisfies Partial<CSSStyleDeclaration>);
+  document.body.appendChild(highlightEl);
+  setTimeout(clearHighlight, 2000);
 }
 
 function clearHighlight() {
-  highlightEl?.remove()
-  highlightEl = null
+  highlightEl?.remove();
+  highlightEl = null;
 }
 
 // --- Signal Graph collection using Angular's debug API ---
 
 function getNg(): any {
-  return (window as any).ng
+  return (window as any).ng;
 }
 
 function collectSignalGraph() {
-  const ng = getNg()
-  if (!ng?.ɵgetSignalGraph) return null
+  const ng = getNg();
+  if (!ng?.ɵgetSignalGraph) return null;
 
   // Get the first component root and its injector
-  const roots = document.querySelectorAll('[ng-version], [_nghost-ng-c]')
+  const roots = document.querySelectorAll('[ng-version], [_nghost-ng-c]');
   for (const root of roots) {
-    const graph = getSignalGraphForElement(root)
-    if (graph) return graph
+    const graph = getSignalGraphForElement(root);
+    if (graph) return graph;
   }
-  return null
+  return null;
 }
 
 function getSignalGraphForElement(el: Element) {
-  const ng = getNg()
-  if (!ng?.ɵgetSignalGraph || !ng?.getInjector) return null
+  const ng = getNg();
+  if (!ng?.ɵgetSignalGraph || !ng?.getInjector) return null;
 
   try {
-    const injector = ng.getInjector(el)
-    if (!injector) return null
+    const injector = ng.getInjector(el);
+    if (!injector) return null;
 
-    const raw = ng.ɵgetSignalGraph(injector)
-    if (!raw) return null
+    const raw = ng.ɵgetSignalGraph(injector);
+    if (!raw) return null;
 
     return {
       nodes: raw.nodes.map((n: any) => ({
@@ -233,74 +233,79 @@ function getSignalGraphForElement(el: Element) {
       })),
       edges: raw.edges ?? [],
       componentSelector: el.tagName.toLowerCase(),
-    }
+    };
   } catch {
-    return null
+    return null;
   }
 }
 
 function serializeValue(val: unknown): unknown {
-  if (val === undefined || val === null) return val
-  if (typeof val === 'function') return `[Function: ${val.name || 'anonymous'}]`
-  if (typeof val === 'symbol') return val.toString()
-  if (typeof val === 'bigint') return val.toString()
+  if (val === undefined || val === null) return val;
+  if (typeof val === 'function') return `[Function: ${val.name || 'anonymous'}]`;
+  if (typeof val === 'symbol') return val.toString();
+  if (typeof val === 'bigint') return val.toString();
   if (typeof val === 'object') {
     try {
-      return JSON.parse(JSON.stringify(val))
+      return JSON.parse(JSON.stringify(val));
     } catch {
-      return String(val)
+      return String(val);
     }
   }
-  return val
+  return val;
 }
 
 // --- DI Injector Tree collection ---
 
 interface CollectedInjector {
-  injector: { id: string; type: string; name: string; providerCount: number }
-  providers: { token: string; type: string; isViewProvider: boolean }[]
-  children: CollectedInjector[]
+  injector: { id: string; type: string; name: string; providerCount: number };
+  providers: { token: string; type: string; isViewProvider: boolean }[];
+  children: CollectedInjector[];
 }
 
 function collectInjectorTree(): CollectedInjector[] {
-  const ng = getNg()
-  if (!ng?.getInjector || !ng?.ɵgetInjectorMetadata) return []
+  const ng = getNg();
+  if (!ng?.getInjector || !ng?.ɵgetInjectorMetadata) return [];
 
-  const roots: CollectedInjector[] = []
-  const visited = new WeakSet()
-  const componentEls = document.querySelectorAll('[ng-version], [_nghost-ng-c]')
+  const roots: CollectedInjector[] = [];
+  const visited = new WeakSet();
+  const componentEls = document.querySelectorAll('[ng-version], [_nghost-ng-c]');
 
   for (const el of componentEls) {
     try {
-      const injector = ng.getInjector(el)
-      if (!injector || visited.has(injector)) continue
-      visited.add(injector)
+      const injector = ng.getInjector(el);
+      if (!injector || visited.has(injector)) continue;
+      visited.add(injector);
 
-      const node = serializeInjectorNode(ng, injector, el, visited)
-      if (node) roots.push(node)
+      const node = serializeInjectorNode(ng, injector, el, visited);
+      if (node) roots.push(node);
     } catch {
       // skip
     }
   }
-  return roots
+  return roots;
 }
 
-function serializeInjectorNode(ng: any, injector: any, el: Element, visited: WeakSet<object>): CollectedInjector | null {
+function serializeInjectorNode(
+  ng: any,
+  injector: any,
+  el: Element,
+  visited: WeakSet<object>,
+): CollectedInjector | null {
   try {
-    const metadata = ng.ɵgetInjectorMetadata?.(injector)
-    if (!metadata) return null
+    const metadata = ng.ɵgetInjectorMetadata?.(injector);
+    if (!metadata) return null;
 
-    const providers = getInjectorProvidersList(ng, injector)
-    const children: CollectedInjector[] = []
+    const providers = getInjectorProvidersList(ng, injector);
+    const children: CollectedInjector[] = [];
 
     // Walk child components
     for (const child of el.querySelectorAll(':scope > *')) {
       try {
-        const childInjector = ng.getInjector(child)
-        if (!childInjector || visited.has(childInjector) || childInjector === injector) continue
-        visited.add(childInjector)
-        const childNode = serializeInjectorNode(ng, childInjector, child, visited)
-        if (childNode) children.push(childNode)
+        const childInjector = ng.getInjector(child);
+        if (!childInjector || visited.has(childInjector) || childInjector === injector) continue;
+        visited.add(childInjector);
+        const childNode = serializeInjectorNode(ng, childInjector, child, visited);
+        if (childNode) children.push(childNode);
       } catch {
         // skip
       }
@@ -310,68 +315,72 @@ function serializeInjectorNode(ng: any, injector: any, el: Element, visited: Wea
       injector: {
         id: `inj-${el.tagName.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}`,
         type: metadata.type ?? 'unknown',
-        name: metadata.type === 'element' ? el.tagName.toLowerCase() : (metadata.source?.toString?.() ?? 'Environment'),
+        name:
+          metadata.type === 'element'
+            ? el.tagName.toLowerCase()
+            : (metadata.source?.toString?.() ?? 'Environment'),
         providerCount: providers.length,
       },
       providers,
       children,
-    }
+    };
   } catch {
-    return null
+    return null;
   }
 }
 
 function getInjectorProvidersList(ng: any, injector: any) {
-  if (!ng.ɵgetInjectorProviders) return []
+  if (!ng.ɵgetInjectorProviders) return [];
   try {
-    const raw = ng.ɵgetInjectorProviders(injector) ?? []
+    const raw = ng.ɵgetInjectorProviders(injector) ?? [];
     return raw.map((p: any) => ({
       token: p.token?.name ?? p.token?.toString?.() ?? 'unknown',
       type: inferProviderType(p),
       isViewProvider: p.isViewProvider ?? false,
-    }))
+    }));
   } catch {
-    return []
+    return [];
   }
 }
 
 function inferProviderType(p: any): string {
-  if (p.useClass) return 'class'
-  if (p.useValue !== undefined) return 'value'
-  if (p.useFactory) return 'factory'
-  if (p.useExisting) return 'existing'
-  return 'class'
+  if (p.useClass) return 'class';
+  if (p.useValue !== undefined) return 'value';
+  if (p.useFactory) return 'factory';
+  if (p.useExisting) return 'existing';
+  return 'class';
 }
 
 function getProvidersForElement(el: Element) {
-  const ng = getNg()
-  if (!ng?.getInjector || !ng?.ɵgetInjectorProviders) return null
+  const ng = getNg();
+  if (!ng?.getInjector || !ng?.ɵgetInjectorProviders) return null;
 
   try {
-    const injector = ng.getInjector(el)
-    if (!injector) return null
+    const injector = ng.getInjector(el);
+    if (!injector) return null;
 
-    const providers = getInjectorProvidersList(ng, injector)
-    const resolutionPath = ng.ɵgetInjectorResolutionPath?.(injector) ?? []
+    const providers = getInjectorProvidersList(ng, injector);
+    const resolutionPath = ng.ɵgetInjectorResolutionPath?.(injector) ?? [];
 
     return {
       providers,
       resolutionPath: resolutionPath.map((inj: any) => {
-        const meta = ng.ɵgetInjectorMetadata?.(inj)
+        const meta = ng.ɵgetInjectorMetadata?.(inj);
         return {
           type: meta?.type ?? 'unknown',
-          name: meta?.type === 'element'
-            ? (meta.source?.tagName?.toLowerCase?.() ?? 'element')
-            : 'environment',
-        }
+          name:
+            meta?.type === 'element'
+              ? (meta.source?.tagName?.toLowerCase?.() ?? 'element')
+              : 'environment',
+        };
       }),
-    }
+    };
   } catch {
-    return null
+    return null;
   }
 }
 
 // Auto-init when loaded as a script
 if (typeof document !== 'undefined') {
-  initOverlay().catch(console.error)
+  initOverlay().catch(console.error);
 }

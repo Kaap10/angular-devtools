@@ -10,9 +10,17 @@ import { Component, signal } from '@angular/core';
     </section>
   `,
   styles: `
-    section { padding: 24px; }
-    h1 { font-size: 24px; margin-bottom: 12px; }
-    button { padding: 8px 16px; cursor: pointer; }
+    section {
+      padding: 24px;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 12px;
+    }
+    button {
+      padding: 8px 16px;
+      cursor: pointer;
+    }
   `,
 })
 export class Home {

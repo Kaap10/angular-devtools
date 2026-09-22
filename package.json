@@ -12,6 +12,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "test:devtools": "vitest run --root packages/ng-devtools",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "serve:ssr:angular-devtools": "node dist/angular-devtools/server/server.mjs",
     "devtools:dev": "vite --config app/vite.config.ts",
     "devtools:build": "vite build --config app/vite.config.ts",

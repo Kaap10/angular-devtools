@@ -1,11 +1,11 @@
-import { Component, input, signal, effect } from '@angular/core'
-import type { DevframeRpcClient } from 'devframe/client'
+import { Component, input, signal, effect } from '@angular/core';
+import type { DevframeRpcClient } from 'devframe/client';
 
 interface RouteInfo {
-  path: string
-  component?: string
-  hasChildren: boolean
-  file: string
+  path: string;
+  component?: string;
+  hasChildren: boolean;
+  file: string;
 }
 
 @Component({
@@ -49,63 +49,109 @@ interface RouteInfo {
     }
   `,
   styles: `
-    .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
     input {
-      flex: 1; padding: 8px 12px; background: #18181b; border: 1px solid #27272a;
-      border-radius: 6px; color: #e4e4e7; font-size: 14px; outline: none;
+      flex: 1;
+      padding: 8px 12px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 6px;
+      color: #e4e4e7;
+      font-size: 14px;
+      outline: none;
     }
-    input:focus { border-color: #a78bfa; }
+    input:focus {
+      border-color: #a78bfa;
+    }
     button {
-      padding: 8px 16px; background: #3f3f46; border: none; border-radius: 6px;
-      color: #e4e4e7; cursor: pointer; font-size: 13px;
+      padding: 8px 16px;
+      background: #3f3f46;
+      border: none;
+      border-radius: 6px;
+      color: #e4e4e7;
+      cursor: pointer;
+      font-size: 13px;
     }
-    button:hover { background: #52525b; }
-    .muted { color: #71717a; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    thead { position: sticky; top: 0; }
+    button:hover {
+      background: #52525b;
+    }
+    .muted {
+      color: #71717a;
+      font-size: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    thead {
+      position: sticky;
+      top: 0;
+    }
     th {
-      text-align: left; padding: 8px 12px; background: #18181b;
-      color: #71717a; font-size: 12px; text-transform: uppercase;
-      letter-spacing: 0.05em; border-bottom: 1px solid #27272a;
+      text-align: left;
+      padding: 8px 12px;
+      background: #18181b;
+      color: #71717a;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #27272a;
     }
-    td { padding: 10px 12px; border-bottom: 1px solid #1e1e22; }
-    tr:hover td { background: #18181b; }
-    .path { font-family: monospace; color: #a78bfa; font-weight: 500; }
-    .file { font-size: 12px; color: #71717a; }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #1e1e22;
+    }
+    tr:hover td {
+      background: #18181b;
+    }
+    .path {
+      font-family: monospace;
+      color: #a78bfa;
+      font-weight: 500;
+    }
+    .file {
+      font-size: 12px;
+      color: #71717a;
+    }
   `,
 })
 export class RouteInspector {
-  rpc = input<DevframeRpcClient | null>(null)
+  rpc = input<DevframeRpcClient | null>(null);
 
-  routes = signal<RouteInfo[]>([])
-  filter = signal('')
-  loading = signal(false)
+  routes = signal<RouteInfo[]>([]);
+  filter = signal('');
+  loading = signal(false);
 
-  filtered = signal<RouteInfo[]>([])
+  filtered = signal<RouteInfo[]>([]);
 
   constructor() {
     effect(() => {
-      const q = this.filter().toLowerCase()
-      const all = this.routes()
-      this.filtered.set(q ? all.filter((r) => r.path.includes(q) || r.file.includes(q)) : all)
-    })
+      const q = this.filter().toLowerCase();
+      const all = this.routes();
+      this.filtered.set(q ? all.filter((r) => r.path.includes(q) || r.file.includes(q)) : all);
+    });
 
     effect(() => {
-      const client = this.rpc()
-      if (client) this.refresh()
-    })
+      const client = this.rpc();
+      if (client) this.refresh();
+    });
   }
 
   async refresh() {
-    const client = this.rpc()
-    if (!client) return
-    this.loading.set(true)
+    const client = this.rpc();
+    if (!client) return;
+    this.loading.set(true);
     try {
-      const my = client.scope('ng-devtools')
-      const result = (await my.rpc.call('get-routes')) as RouteInfo[]
-      this.routes.set(result)
+      const my = client.scope('ng-devtools');
+      const result = (await my.rpc.call('get-routes')) as RouteInfo[];
+      this.routes.set(result);
     } finally {
-      this.loading.set(false)
+      this.loading.set(false);
     }
   }
 }

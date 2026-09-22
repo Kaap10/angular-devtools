@@ -3,9 +3,8 @@
 
 (function detectAngular() {
   function check() {
-    const ngVersion =
-      document.querySelector('[ng-version]')?.getAttribute('ng-version') ?? null
-    const hasNgGlobal = typeof window.ng !== 'undefined'
+    const ngVersion = document.querySelector('[ng-version]')?.getAttribute('ng-version') ?? null;
+    const hasNgGlobal = typeof window.ng !== 'undefined';
 
     if (ngVersion || hasNgGlobal) {
       window.postMessage(
@@ -14,17 +13,17 @@
           version: ngVersion,
         },
         '*',
-      )
-      return true
+      );
+      return true;
     }
-    return false
+    return false;
   }
 
   // Check immediately, then retry a few times for lazy-loaded apps
   if (!check()) {
-    let retries = 0
+    let retries = 0;
     const interval = setInterval(() => {
-      if (check() || ++retries > 10) clearInterval(interval)
-    }, 500)
+      if (check() || ++retries > 10) clearInterval(interval);
+    }, 500);
   }
-})()
+})();

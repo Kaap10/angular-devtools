@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterOutlet } from '@angular/router';
-import {HttpClient} from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 
 @Component({
   imports: [RouterOutlet, RouterLink],
@@ -13,5 +13,5 @@ export class App {
 
   couter = signal(0);
 
-  http= inject(HttpClient).get('https://jsonplaceholder.typicode.com/posts')
+  http = inject(HttpClient).get('https://jsonplaceholder.typicode.com/posts');
 }

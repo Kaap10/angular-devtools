@@ -1,7 +1,7 @@
-import { defineRpcFunction } from 'devframe'
-import * as v from 'valibot'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { defineRpcFunction } from 'devframe';
+import * as v from 'valibot';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
 const ComponentSchema = v.object({
   selector: v.string(),
@@ -9,7 +9,7 @@ const ComponentSchema = v.object({
   inputs: v.array(v.string()),
   outputs: v.array(v.string()),
   isStandalone: v.boolean(),
-})
+});
 
 export const getComponents = defineRpcFunction({
   name: 'get-components',
@@ -25,67 +25,67 @@ export const getComponents = defineRpcFunction({
   setup: (ctx) => ({
     handler: async () => scanComponents(join(ctx.cwd, 'src'), ctx.cwd),
   }),
-})
+});
 
 interface ComponentInfo {
-  selector: string
-  file: string
-  inputs: string[]
-  outputs: string[]
-  isStandalone: boolean
+  selector: string;
+  file: string;
+  inputs: string[];
+  outputs: string[];
+  isStandalone: boolean;
 }
 
 function scanComponents(dir: string, cwd: string): ComponentInfo[] {
-  const components: ComponentInfo[] = []
-  walk(dir, cwd, components)
-  return components
+  const components: ComponentInfo[] = [];
+  walk(dir, cwd, components);
+  return components;
 }
 
 function walk(dir: string, cwd: string, out: ComponentInfo[]) {
-  let entries: string[]
+  let entries: string[];
   try {
-    entries = readdirSync(dir)
+    entries = readdirSync(dir);
   } catch {
-    return
+    return;
   }
 
   for (const entry of entries) {
-    const full = join(dir, entry)
+    const full = join(dir, entry);
     try {
       if (statSync(full).isDirectory()) {
-        if (entry !== 'node_modules') walk(full, cwd, out)
-        continue
+        if (entry !== 'node_modules') walk(full, cwd, out);
+        continue;
       }
     } catch {
-      continue
+      continue;
     }
 
-    if (!entry.endsWith('.ts') || entry.endsWith('.spec.ts')) continue
+    if (!entry.endsWith('.ts') || entry.endsWith('.spec.ts')) continue;
 
     try {
-      const content = readFileSync(full, 'utf-8')
-      if (!content.includes('@Component')) continue
+      const content = readFileSync(full, 'utf-8');
+      if (!content.includes('@Component')) continue;
 
-      const selectorMatch = content.match(/selector:\s*['"`]([^'"`]+)['"`]/)
-      if (!selectorMatch) continue
+      const selectorMatch = content.match(/selector:\s*['"`]([^'"`]+)['"`]/);
+      if (!selectorMatch) continue;
 
-      const inputs: string[] = []
+      const inputs: string[] = [];
       for (const m of content.matchAll(/(\w+)\s*=\s*input(?:<|\.required)/g)) {
-        inputs.push(m[1])
+        inputs.push(m[1]);
       }
       for (const m of content.matchAll(/@Input\(\)\s+(\w+)/g)) {
-        inputs.push(m[1])
+        inputs.push(m[1]);
       }
 
-      const outputs: string[] = []
+      const outputs: string[] = [];
       for (const m of content.matchAll(/(\w+)\s*=\s*output(?:<|\()/g)) {
-        outputs.push(m[1])
+        outputs.push(m[1]);
       }
       for (const m of content.matchAll(/@Output\(\)\s+(\w+)/g)) {
-        outputs.push(m[1])
+        outputs.push(m[1]);
       }
 
-      const isStandalone = !content.includes('standalone: false')
+      const isStandalone = !content.includes('standalone: false');
 
       out.push({
         selector: selectorMatch[1],
@@ -93,7 +93,7 @@ function walk(dir: string, cwd: string, out: ComponentInfo[]) {
         inputs,
         outputs,
         isStandalone,
-      })
+      });
     } catch {
       // skip
     }

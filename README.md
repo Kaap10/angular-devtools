@@ -33,11 +33,11 @@ Add the devframe middleware to your Express server:
 
 ```ts
 // server.ts
-import { initDevframe } from 'devframe/initiate'
-import ngDevtools from '@santoshyadavdev/ng-devtools/devframe'
+import { initDevframe } from 'devframe/initiate';
+import ngDevtools from '@santoshyadavdev/ng-devtools/devframe';
 
-const devtools = initDevframe(ngDevtools, { base: '/__ng-devtools/' })
-app.use(devtools.nodeMiddleware)
+const devtools = initDevframe(ngDevtools, { base: '/__ng-devtools/' });
+app.use(devtools.nodeMiddleware);
 ```
 
 Open `http://localhost:4000/__ng-devtools/` to see the devtools UI.
@@ -87,22 +87,22 @@ When embedded in Express, the MCP endpoint is also available over HTTP at `/__ng
 
 #### Agent Tools
 
-| Tool | Description |
-|---|---|
-| `ng-devtools:get-routes` | List Angular routes from source |
-| `ng-devtools:get-components` | Discover components, inputs, outputs |
-| `ng-devtools:build-meta` | Angular/TS versions, SSR status |
-| `ng-devtools:highlight` | Highlight a component in the page |
-| `ng-devtools:inspect-signals` | Signal graph for a component |
-| `ng-devtools:inspect-providers` | DI providers and resolution path |
+| Tool                            | Description                          |
+| ------------------------------- | ------------------------------------ |
+| `ng-devtools:get-routes`        | List Angular routes from source      |
+| `ng-devtools:get-components`    | Discover components, inputs, outputs |
+| `ng-devtools:build-meta`        | Angular/TS versions, SSR status      |
+| `ng-devtools:highlight`         | Highlight a component in the page    |
+| `ng-devtools:inspect-signals`   | Signal graph for a component         |
+| `ng-devtools:inspect-providers` | DI providers and resolution path     |
 
 #### Agent Resources
 
-| Resource | Content |
-|---|---|
+| Resource                     | Content                  |
+| ---------------------------- | ------------------------ |
 | `ng-devtools:component-tree` | Live component hierarchy |
-| `ng-devtools:signal-graph` | Signal dependency graph |
-| `ng-devtools:injector-tree` | DI injector hierarchy |
+| `ng-devtools:signal-graph`   | Signal dependency graph  |
+| `ng-devtools:injector-tree`  | DI injector hierarchy    |
 
 ### Vite DevTools Dock
 
@@ -110,9 +110,9 @@ Mount as a dock panel inside Vite DevTools:
 
 ```ts
 // vite.config.ts
-import { viteDevframeHub } from '@devframes/vite/hub'
-import { createUi } from '@devframes/hub-ui'
-import ngDevtools from '@santoshyadavdev/ng-devtools/devframe'
+import { viteDevframeHub } from '@devframes/vite/hub';
+import { createUi } from '@devframes/hub-ui';
+import ngDevtools from '@santoshyadavdev/ng-devtools/devframe';
 
 export default defineConfig({
   plugins: [
@@ -121,7 +121,7 @@ export default defineConfig({
       ui: createUi({ branding: { productName: 'Angular DevTools' } }),
     }),
   ],
-})
+});
 ```
 
 ### Chrome DevTools Extension
@@ -133,9 +133,9 @@ See the [Chrome Extension](#chrome-devtools-extension-1) section below for how t
 The overlay runs inside the user's Angular page and collects live component, signal, and DI data:
 
 ```ts
-import { initOverlay } from '@santoshyadavdev/ng-devtools/overlay'
+import { initOverlay } from '@santoshyadavdev/ng-devtools/overlay';
 
-const dispose = await initOverlay()
+const dispose = await initOverlay();
 ```
 
 ## Development
@@ -161,9 +161,9 @@ pnpm start
 
 The devtool ships as two npm packages:
 
-| Package | Contents |
-|---|---|
-| `@santoshyadavdev/ng-devtools` | Node-side logic, RPC, CLI, overlay |
+| Package                               | Contents                                               |
+| ------------------------------------- | ------------------------------------------------------ |
+| `@santoshyadavdev/ng-devtools`        | Node-side logic, RPC, CLI, overlay                     |
 | `@santoshyadavdev/ng-devtools-assets` | Built SPA (served at runtime via CDN or local install) |
 
 ```sh
@@ -216,11 +216,7 @@ extension/
 
 ```js
 // devtools.js — creates the panel in Chrome DevTools
-chrome.devtools.panels.create(
-  'Angular',
-  'icon-128.png',
-  'panel.html'
-)
+chrome.devtools.panels.create('Angular', 'icon-128.png', 'panel.html');
 ```
 
 ### 4. `extension/panel.html`
@@ -231,7 +227,9 @@ This is where the built SPA loads. Copy the built assets (`dist/devtools-ui/`) i
 <!-- panel.html — the devtools SPA loads here -->
 <!doctype html>
 <html>
-  <head><meta charset="utf-8" /></head>
+  <head>
+    <meta charset="utf-8" />
+  </head>
   <body>
     <iframe src="ui/index.html" style="width:100%;height:100vh;border:none;"></iframe>
   </body>

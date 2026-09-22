@@ -3,10 +3,10 @@ chrome.runtime.sendMessage(
   { type: 'is-angular-page', tabId: chrome.devtools.inspectedWindow.tabId },
   (response) => {
     if (response?.isAngular) {
-      createPanel()
+      createPanel();
     }
   },
-)
+);
 
 // Also listen for late detection (SPA navigation after devtools open)
 chrome.runtime.onMessage.addListener((message) => {
@@ -14,18 +14,14 @@ chrome.runtime.onMessage.addListener((message) => {
     message.type === 'angular-detected' &&
     message.tabId === chrome.devtools.inspectedWindow.tabId
   ) {
-    createPanel()
+    createPanel();
   }
-})
+});
 
-let panelCreated = false
+let panelCreated = false;
 function createPanel() {
-  if (panelCreated) return
-  panelCreated = true
+  if (panelCreated) return;
+  panelCreated = true;
 
-  chrome.devtools.panels.create(
-    'Angular DevTools',
-    'icons/icon-128.png',
-    'panel.html',
-  )
+  chrome.devtools.panels.create('Angular DevTools', 'icons/icon-128.png', 'panel.html');
 }

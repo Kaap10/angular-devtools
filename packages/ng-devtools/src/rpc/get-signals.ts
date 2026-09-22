@@ -1,7 +1,7 @@
-import { defineRpcFunction } from 'devframe'
-import * as v from 'valibot'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { defineRpcFunction } from 'devframe';
+import * as v from 'valibot';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
 const SignalEntrySchema = v.object({
   name: v.string(),
@@ -9,7 +9,7 @@ const SignalEntrySchema = v.object({
   file: v.string(),
   line: v.number(),
   component: v.optional(v.string()),
-})
+});
 
 export const getSignals = defineRpcFunction({
   name: 'get-signals',
@@ -25,14 +25,14 @@ export const getSignals = defineRpcFunction({
   setup: (ctx) => ({
     handler: async () => scanSignals(join(ctx.cwd, 'src'), ctx.cwd),
   }),
-})
+});
 
 interface SignalEntry {
-  name: string
-  kind: string
-  file: string
-  line: number
-  component?: string
+  name: string;
+  kind: string;
+  file: string;
+  line: number;
+  component?: string;
 }
 
 const SIGNAL_PATTERNS: { pattern: RegExp; kind: string }[] = [
@@ -49,56 +49,56 @@ const SIGNAL_PATTERNS: { pattern: RegExp; kind: string }[] = [
   { pattern: /(\w+)\s*=\s*contentChild\s*[<.(]/g, kind: 'contentChild (signal)' },
   { pattern: /(\w+)\s*=\s*contentChildren\s*[<(]/g, kind: 'contentChildren (signal)' },
   { pattern: /(\w+)\s*=\s*resource\s*[<(]/g, kind: 'resource' },
-]
+];
 
 function scanSignals(dir: string, cwd: string): SignalEntry[] {
-  const entries: SignalEntry[] = []
-  walk(dir, cwd, entries)
-  return entries
+  const entries: SignalEntry[] = [];
+  walk(dir, cwd, entries);
+  return entries;
 }
 
 function walk(dir: string, cwd: string, out: SignalEntry[]) {
-  let items: string[]
+  let items: string[];
   try {
-    items = readdirSync(dir)
+    items = readdirSync(dir);
   } catch {
-    return
+    return;
   }
 
   for (const item of items) {
-    const full = join(dir, item)
+    const full = join(dir, item);
     try {
       if (statSync(full).isDirectory()) {
-        if (item !== 'node_modules') walk(full, cwd, out)
-        continue
+        if (item !== 'node_modules') walk(full, cwd, out);
+        continue;
       }
     } catch {
-      continue
+      continue;
     }
 
-    if (!item.endsWith('.ts') || item.endsWith('.spec.ts') || item.endsWith('.d.ts')) continue
+    if (!item.endsWith('.ts') || item.endsWith('.spec.ts') || item.endsWith('.d.ts')) continue;
 
     try {
-      const content = readFileSync(full, 'utf-8')
-      const relPath = relative(cwd, full)
-      const lines = content.split('\n')
+      const content = readFileSync(full, 'utf-8');
+      const relPath = relative(cwd, full);
+      const lines = content.split('\n');
 
       // Detect enclosing component
-      const componentMatch = content.match(/selector:\s*['"`]([^'"`]+)['"`]/)
-      const component = componentMatch?.[1]
+      const componentMatch = content.match(/selector:\s*['"`]([^'"`]+)['"`]/);
+      const component = componentMatch?.[1];
 
       for (const { pattern, kind } of SIGNAL_PATTERNS) {
-        pattern.lastIndex = 0
-        let match: RegExpExecArray | null
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
         while ((match = pattern.exec(content)) !== null) {
-          const lineNum = content.substring(0, match.index).split('\n').length
+          const lineNum = content.substring(0, match.index).split('\n').length;
           out.push({
             name: match[1],
             kind,
             file: relPath,
             line: lineNum,
             component,
-          })
+          });
         }
       }
     } catch {

@@ -5,19 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Angular DevTools</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 100%; height: 100%; overflow: hidden; background: #0f0f11; }
-      iframe { width: 100%; height: 100%; border: none; }
-      .connecting {
-        display: flex; align-items: center; justify-content: center;
-        height: 100%; color: #a1a1aa; font-family: system-ui, sans-serif; font-size: 14px;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-      .connecting.hidden { display: none; }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0f0f11;
+      }
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+      }
+      .connecting {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #a1a1aa;
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+      }
+      .connecting.hidden {
+        display: none;
+      }
     </style>
   </head>
   <body>
     <div id="status" class="connecting">Detecting Angular app…</div>
-    <iframe id="devtools-frame" style="display:none"></iframe>
+    <iframe id="devtools-frame" style="display: none"></iframe>
     <script src="panel-bridge.js"></script>
   </body>
 </html>
