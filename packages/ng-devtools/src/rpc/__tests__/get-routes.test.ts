@@ -20,7 +20,98 @@ describe('get-routes', () => {
   it('reads an eager component', async () => {
     const routes = await routesFor(`[{ path: 'about', component: AboutComponent }]`);
     expect(routes).toEqual([
-      { path: 'about', component: 'AboutComponent', hasChildren: false, file: 'src/app.routes.ts' },
+      {
+        path: 'about',
+        component: 'AboutComponent',
+        redirectTo: undefined,
+        title: undefined,
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+    ]);
+  });
+
+  it('reads redirectTo on redirection routes', async () => {
+    const routes = await routesFor(`[
+      { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+      { path: 'home', redirectTo: '/dashboard' },
+      { path: 'login', redirectTo: \`auth/login\` },
+    ]`);
+    expect(routes.map((r) => [r.path, r.redirectTo])).toEqual([
+      ['', 'dashboard'],
+      ['home', '/dashboard'],
+      ['login', 'auth/login'],
+    ]);
+  });
+
+  it('reads title on route definitions', async () => {
+    const routes = await routesFor(`[
+      { path: 'home', component: HomeComponent, title: 'Home Page' },
+      { path: 'settings', component: SettingsComponent, title: "Settings | App" },
+      { path: 'about', title: 'About {us}', component: AboutComponent },
+    ]`);
+    expect(routes.map((r) => [r.path, r.title])).toEqual([
+      ['home', 'Home Page'],
+      ['settings', 'Settings | App'],
+      ['about', 'About {us}'],
+    ]);
+  });
+
+  it('reads full route configuration with redirectTo and title', async () => {
+    const routes = await routesFor(`[
+      { path: '', redirectTo: 'home', pathMatch: 'full' },
+      { path: 'home', component: HomeComponent, title: 'Home' },
+      {
+        path: 'dashboard',
+        component: DashboardComponent,
+        title: 'Dashboard',
+        children: [{ path: 'stats', component: StatsComponent }],
+      },
+    ]`);
+    expect(routes).toEqual([
+      {
+        path: '',
+        component: undefined,
+        redirectTo: 'home',
+        title: undefined,
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+      {
+        path: 'home',
+        component: 'HomeComponent',
+        redirectTo: undefined,
+        title: 'Home',
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+      {
+        path: 'dashboard',
+        component: 'DashboardComponent',
+        redirectTo: undefined,
+        title: 'Dashboard',
+        hasChildren: true,
+        file: 'src/app.routes.ts',
+      },
+      {
+        path: 'stats',
+        component: 'StatsComponent',
+        redirectTo: undefined,
+        title: undefined,
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+    ]);
+  });
+
+  it('handles function or expression title / redirectTo gracefully', async () => {
+    const routes = await routesFor(`[
+      { path: 'custom-title', component: HomeComponent, title: customTitleResolver },
+      { path: 'custom-redirect', redirectTo: () => '/fallback' },
+    ]`);
+    expect(routes.map((r) => [r.path, r.title, r.redirectTo])).toEqual([
+      ['custom-title', undefined, undefined],
+      ['custom-redirect', undefined, undefined],
     ]);
   });
 

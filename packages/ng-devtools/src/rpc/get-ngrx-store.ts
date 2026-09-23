@@ -140,7 +140,7 @@ function walk(dir: string, cwd: string, out: NgrxStoreEntry[]) {
         continue;
       }
 
-      const relPath = relative(cwd, full);
+      const relPath = relative(cwd, full).replaceAll('\\', '/');
 
       for (const { pattern, kind } of NGRX_PATTERNS) {
         pattern.lastIndex = 0;

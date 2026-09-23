@@ -89,7 +89,7 @@ function walk(dir: string, cwd: string, out: ComponentInfo[]) {
 
       out.push({
         selector: selectorMatch[1],
-        file: relative(cwd, full),
+        file: relative(cwd, full).replaceAll('\\', '/'),
         inputs,
         outputs,
         isStandalone,

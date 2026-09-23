@@ -10,6 +10,8 @@ export interface ComponentNode {
 export interface RouteInfo {
   path: string;
   component?: string;
+  redirectTo?: string;
+  title?: string;
   hasChildren: boolean;
   guards?: string[];
 }

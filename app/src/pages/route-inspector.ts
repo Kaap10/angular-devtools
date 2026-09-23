@@ -1,9 +1,11 @@
-import { Component, input, signal, effect } from '@angular/core';
+import { Component, input, signal, effect, computed } from '@angular/core';
 import type { DevframeRpcClient } from 'devframe/client';
 
 interface RouteInfo {
   path: string;
   component?: string;
+  redirectTo?: string;
+  title?: string;
   hasChildren: boolean;
   file: string;
 }
@@ -14,11 +16,12 @@ interface RouteInfo {
     <div class="toolbar">
       <input
         type="text"
+        aria-label="Filter routes"
         placeholder="Filter routes…"
         [value]="filter()"
-        (input)="filter.set($any($event.target).value)"
+        (input)="onFilterInput($event)"
       />
-      <button (click)="refresh()">Refresh</button>
+      <button type="button" (click)="refresh()">Refresh</button>
     </div>
 
     @if (loading()) {
@@ -29,17 +32,34 @@ interface RouteInfo {
       <table role="table">
         <thead>
           <tr>
-            <th>Path</th>
-            <th>Component</th>
-            <th>File</th>
-            <th>Children</th>
+            <th scope="col">Path</th>
+            <th scope="col">Component / Target</th>
+            <th scope="col">Title</th>
+            <th scope="col">File</th>
+            <th scope="col">Children</th>
           </tr>
         </thead>
         <tbody>
           @for (route of filtered(); track route.path + route.file) {
             <tr>
               <td class="path">/{{ route.path }}</td>
-              <td>{{ route.component ?? '—' }}</td>
+              <td>
+                @if (route.redirectTo !== undefined) {
+                  <span class="redirect"
+                    >➜
+                    {{
+                      route.redirectTo
+                        ? route.redirectTo.startsWith('/')
+                          ? route.redirectTo
+                          : '/' + route.redirectTo
+                        : '/'
+                    }}</span
+                  >
+                } @else {
+                  {{ route.component ?? '—' }}
+                }
+              </td>
+              <td>{{ route.title ?? '—' }}</td>
               <td class="file">{{ route.file }}</td>
               <td>{{ route.hasChildren ? 'Yes' : '—' }}</td>
             </tr>
@@ -114,6 +134,10 @@ interface RouteInfo {
       color: #a78bfa;
       font-weight: 500;
     }
+    .redirect {
+      font-family: monospace;
+      color: #38bdf8;
+    }
     .file {
       font-size: 12px;
       color: #71717a;
@@ -127,19 +151,30 @@ export class RouteInspector {
   filter = signal('');
   loading = signal(false);
 
-  filtered = signal<RouteInfo[]>([]);
+  filtered = computed(() => {
+    const q = this.filter().toLowerCase().trim();
+    const all = this.routes();
+    if (!q) return all;
+    return all.filter(
+      (r) =>
+        r.path.toLowerCase().includes(q) ||
+        (r.component && r.component.toLowerCase().includes(q)) ||
+        (r.redirectTo && r.redirectTo.toLowerCase().includes(q)) ||
+        (r.title && r.title.toLowerCase().includes(q)) ||
+        r.file.toLowerCase().includes(q),
+    );
+  });
 
   constructor() {
-    effect(() => {
-      const q = this.filter().toLowerCase();
-      const all = this.routes();
-      this.filtered.set(q ? all.filter((r) => r.path.includes(q) || r.file.includes(q)) : all);
-    });
-
     effect(() => {
       const client = this.rpc();
       if (client) this.refresh();
     });
+  }
+
+  onFilterInput(event: Event) {
+    const target = event.target as HTMLInputElement | null;
+    this.filter.set(target?.value ?? '');
   }
 
   async refresh() {

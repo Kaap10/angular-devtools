@@ -7,9 +7,13 @@ import { skipString, stripComments } from './source-scan.ts';
 const RouteSchema = v.object({
   path: v.string(),
   component: v.optional(v.string()),
+  redirectTo: v.optional(v.string()),
+  title: v.optional(v.string()),
   hasChildren: v.boolean(),
   file: v.string(),
 });
+
+type ExtractedRoute = v.InferOutput<typeof RouteSchema>;
 
 export const getRoutes = defineRpcFunction({
   name: 'get-routes',
@@ -27,17 +31,13 @@ export const getRoutes = defineRpcFunction({
   }),
 });
 
-function extractRoutes(cwd: string) {
-  const routes: { path: string; component?: string; hasChildren: boolean; file: string }[] = [];
+function extractRoutes(cwd: string): ExtractedRoute[] {
+  const routes: ExtractedRoute[] = [];
   findRouteFiles(join(cwd, 'src'), cwd, routes);
   return routes;
 }
 
-function findRouteFiles(
-  dir: string,
-  cwd: string,
-  routes: { path: string; component?: string; hasChildren: boolean; file: string }[],
-) {
+function findRouteFiles(dir: string, cwd: string, routes: ExtractedRoute[]) {
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -60,15 +60,17 @@ function findRouteFiles(
 
     try {
       const content = readFileSync(full, 'utf-8');
-      const relPath = relative(cwd, full);
+      const relPath = relative(cwd, full).replaceAll('\\', '/');
 
       for (const body of objectLiterals(stripComments(content))) {
         const props = topLevelProps(body);
-        const path = props.get('path')?.match(/^['"`]([^'"`]*)['"`]$/)?.[1];
+        const path = stringLiteral(props.get('path'));
         if (path === undefined) continue;
         routes.push({
           path,
           component: routeComponent(props),
+          redirectTo: stringLiteral(props.get('redirectTo')),
+          title: stringLiteral(props.get('title')),
           hasChildren: props.has('children'),
           file: relPath,
         });
@@ -77,6 +79,11 @@ function findRouteFiles(
       // skip unreadable files
     }
   }
+}
+
+function stringLiteral(value?: string): string | undefined {
+  const match = value?.match(/^(['"`])([\s\S]*)\1$/);
+  return match?.[2];
 }
 
 function routeComponent(props: Map<string, string>): string | undefined {
