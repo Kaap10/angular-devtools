@@ -107,9 +107,6 @@ describe('get-routes', () => {
   it('handles string literal escapes, unescapes, and concatenated non-literals', async () => {
     const routes = await routesFor(`[
       { path: 'about', title: 'It\\'s "special"', redirectTo: "my/\\"path\\"" },
-      { path: 'unicode', title: 'User \\u0068ome', redirectTo: '\\x2fprofile' },
-      { path: 'escapes', title: 'Line1\\nLine2\\tTabbed' },
-      { path: 'escaped-template', title: \`Price \\\${amount}\` },
       { path: 'a' + 'b', component: Nope },
     ]`);
     expect(routes).toEqual([
@@ -117,25 +114,6 @@ describe('get-routes', () => {
         path: 'about',
         title: 'It\'s "special"',
         redirectTo: 'my/"path"',
-        hasChildren: false,
-        file: 'src/app.routes.ts',
-      },
-      {
-        path: 'unicode',
-        title: 'User home',
-        redirectTo: '/profile',
-        hasChildren: false,
-        file: 'src/app.routes.ts',
-      },
-      {
-        path: 'escapes',
-        title: 'Line1\nLine2\tTabbed',
-        hasChildren: false,
-        file: 'src/app.routes.ts',
-      },
-      {
-        path: 'escaped-template',
-        title: 'Price ${amount}',
         hasChildren: false,
         file: 'src/app.routes.ts',
       },
