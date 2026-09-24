@@ -76,7 +76,7 @@ interface RouteInfo {
       outline: none;
     }
     input:focus {
-      border-color: #a78bfa;
+      border-color: var(--accent);
     }
     button {
       padding: 8px 16px;
@@ -122,7 +122,7 @@ interface RouteInfo {
     }
     .path {
       font-family: monospace;
-      color: #a78bfa;
+      color: var(--accent);
       font-weight: 500;
     }
     .redirect {

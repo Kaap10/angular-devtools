@@ -89,15 +89,19 @@ When embedded in Express, the MCP endpoint is also available over HTTP at `/__ng
 
 #### Agent Tools
 
-| Tool                            | Description                          |
-| ------------------------------- | ------------------------------------ |
-| `ng-devtools:get-routes`        | List Angular routes from source      |
-| `ng-devtools:get-components`    | Discover components, inputs, outputs |
-| `ng-devtools:build-meta`        | Angular/TS versions, SSR status      |
-| `ng-devtools:highlight`         | Highlight a component in the page    |
-| `ng-devtools:inspect-signals`   | Signal graph for a component         |
-| `ng-devtools:inspect-providers` | DI providers and resolution path     |
-| `ng-devtools:get-ngrx-store`    | Scan source for NgRx store patterns  |
+MCP clients see these with an underscore, as `ng-devtools_get-routes`.
+
+| Tool                            | Description                                                 |
+| ------------------------------- | ----------------------------------------------------------- |
+| `ng-devtools:get-routes`        | List Angular routes from source                             |
+| `ng-devtools:get-components`    | Discover components and directives, with inputs and outputs |
+| `ng-devtools:get-signals`       | Signal declarations from source                             |
+| `ng-devtools:get-providers`     | DI providers from source                                    |
+| `ng-devtools:build-meta`        | Angular/TS versions, SSR status                             |
+| `ng-devtools:highlight`         | Highlight a component in the page                           |
+| `ng-devtools:inspect-signals`   | Signal graph a connected page reported                      |
+| `ng-devtools:inspect-providers` | Injector tree a connected page reported                     |
+| `ng-devtools:get-ngrx-store`    | Scan source for NgRx store patterns                         |
 
 #### Agent Resources
 
@@ -134,12 +138,24 @@ See the [Chrome Extension](#chrome-devtools-extension-1) section below for how t
 
 ### Browser Overlay
 
-The overlay runs inside the user's Angular page and collects live component, signal, DI, and NgRx data:
+The overlay runs inside the user's Angular page and collects live component, signal, DI, and NgRx data. Importing the module starts it, so in most apps that import is all that is needed:
+
+```ts
+import '@santoshyadavdev/ng-devtools/overlay';
+```
+
+It looks for the devframe connection next to the page and then at
+`/__ng-devtools/`.
+
+`initOverlay` is exported for a devtools mounted somewhere else. Importing the
+module has already started an overlay on the default URLs by then, so dispose of
+that one before starting another, or the page ends up with two connections and
+two polling intervals:
 
 ```ts
 import { initOverlay } from '@santoshyadavdev/ng-devtools/overlay';
 
-const dispose = await initOverlay();
+const dispose = await initOverlay({ baseURL: '/__my-devtools/' });
 ```
 
 ### In-Page Popup

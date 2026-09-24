@@ -1,8 +1,16 @@
 import { defineRpcFunction } from 'devframe';
 import * as v from 'valibot';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { describable } from './agent-schema.ts';
+import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { skipString, stripComments } from './source-scan.ts';
+import {
+  IGNORED_DIRS,
+  skipRegex,
+  skipString,
+  sourceRoots,
+  startsRegex,
+  stripComments,
+} from './source-scan.ts';
 
 const RouteSchema = v.object({
   path: v.string(),
@@ -20,7 +28,7 @@ export const getRoutes = defineRpcFunction({
   type: 'query',
   jsonSerializable: true,
   args: [],
-  returns: v.array(RouteSchema),
+  returns: describable(v.array(RouteSchema)),
   agent: {
     description:
       'List Angular routes extracted from route configuration files in the workspace. Call before suggesting navigation changes or analyzing the app structure.',
@@ -33,7 +41,7 @@ export const getRoutes = defineRpcFunction({
 
 function extractRoutes(cwd: string): ExtractedRoute[] {
   const routes: ExtractedRoute[] = [];
-  findRouteFiles(join(cwd, 'src'), cwd, routes);
+  for (const root of sourceRoots(cwd)) findRouteFiles(root, cwd, routes);
   return routes;
 }
 
@@ -48,8 +56,11 @@ function findRouteFiles(dir: string, cwd: string, routes: ExtractedRoute[]) {
   for (const entry of entries) {
     const full = join(dir, entry);
     try {
-      if (statSync(full).isDirectory()) {
-        if (entry !== 'node_modules') findRouteFiles(full, cwd, routes);
+      const stats = lstatSync(full);
+      // Not followed: a link can point anywhere, including outside the workspace.
+      if (stats.isSymbolicLink()) continue;
+      if (stats.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.toLowerCase())) findRouteFiles(full, cwd, routes);
         continue;
       }
     } catch {
@@ -71,7 +82,8 @@ function findRouteFiles(dir: string, cwd: string, routes: ExtractedRoute[]) {
           component: routeComponent(props),
           redirectTo: routeRedirectTo(props),
           title: routeTitle(props),
-          hasChildren: props.has('children'),
+          // `loadChildren` has children too, it just loads them lazily.
+          hasChildren: props.has('children') || props.has('loadChildren'),
           file: relPath,
         });
       }
@@ -161,7 +173,8 @@ function objectLiterals(source: string): string[] {
   const open: Bracket[] = [];
   for (let i = 0; i < source.length; i++) {
     const ch = source[i];
-    if (ch === '"' || ch === "'" || ch === '`') i = skipString(source, i);
+    if (ch === '/' && startsRegex(source, i)) i = skipRegex(source, i);
+    else if (ch === '"' || ch === "'" || ch === '`') i = skipString(source, i);
     else if ('([{'.includes(ch)) {
       const parent = open.at(-1);
       open.push({
@@ -189,7 +202,8 @@ function topLevelProps(body: string): Map<string, string> {
   let start = 0;
   for (let i = 0; i < body.length; i++) {
     const ch = body[i];
-    if (ch === '"' || ch === "'" || ch === '`') i = skipString(body, i);
+    if (ch === '/' && startsRegex(body, i)) i = skipRegex(body, i);
+    else if (ch === '"' || ch === "'" || ch === '`') i = skipString(body, i);
     else if ('([{'.includes(ch)) depth++;
     else if (')]}'.includes(ch)) depth--;
     else if (ch === ',' && depth === 0) {
