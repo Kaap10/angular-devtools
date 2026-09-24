@@ -79,7 +79,7 @@ export async function initOverlay() {
   };
 }
 
-function collectComponentTree() {
+export function collectComponentTree() {
   const nodes: ComponentTreeNode[] = [];
   const roots = document.querySelectorAll('[ng-version], [_nghost-ng-c]');
 
@@ -105,23 +105,28 @@ interface ComponentTreeNode {
   inputs?: Record<string, unknown>;
 }
 
-function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: any) {
+export function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: any) {
   const component = ng.getComponent(el);
-  if (!component) return;
 
-  const node: ComponentTreeNode = {
-    id: generateId(el),
-    selector: el.tagName.toLowerCase(),
-    tagName: el.tagName.toLowerCase(),
-    children: [],
-    inputs: tryGetInputs(component),
-  };
+  if (component) {
+    const node: ComponentTreeNode = {
+      id: generateId(el),
+      selector: el.tagName.toLowerCase(),
+      tagName: el.tagName.toLowerCase(),
+      children: [],
+      inputs: tryGetInputs(component),
+    };
 
-  for (const child of el.querySelectorAll(':scope > *')) {
-    walkAngularTree(child, node.children, ng);
+    for (const child of el.children) {
+      walkAngularTree(child, node.children, ng);
+    }
+
+    out.push(node);
+  } else {
+    for (const child of el.children) {
+      walkAngularTree(child, out, ng);
+    }
   }
-
-  out.push(node);
 }
 
 function walkDom(el: Element, out: ComponentTreeNode[]) {
@@ -548,8 +553,11 @@ function safeSerialize(val: unknown): unknown {
   }
 }
 
-// Auto-init when loaded as a script
-if (typeof document !== 'undefined') {
+// Auto-init when loaded as a script (skip during test environment)
+if (
+  typeof document !== 'undefined' &&
+  !(typeof process !== 'undefined' && process.env?.['VITEST'])
+) {
   initOverlay().catch(console.error);
   import('./popup.ts').then((m) => m.createDevtoolsPopup()).catch(console.error);
 }
