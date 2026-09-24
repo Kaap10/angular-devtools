@@ -88,7 +88,38 @@ function stringLiteral(v?: string): string | undefined {
   if (skipString(v, 0) !== v.length - 1) return undefined;
   if (quote === '`' && v.includes('${')) return undefined;
   const raw = v.slice(1, -1);
-  return raw.replace(/\\(.)/g, '$1');
+  return decodeEscapes(raw);
+}
+
+function decodeEscapes(str: string): string {
+  return str.replace(
+    /\\(?:(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})|([nrtbfv0\\])|(\r\n|[\r\n\u2028\u2029])|(.))/g,
+    (_, hex, char, lineCont, anyChar) => {
+      if (hex) return String.fromCharCode(parseInt(hex.slice(1), 16));
+      if (lineCont) return '';
+      if (char) {
+        switch (char) {
+          case 'n':
+            return '\n';
+          case 'r':
+            return '\r';
+          case 't':
+            return '\t';
+          case 'b':
+            return '\b';
+          case 'f':
+            return '\f';
+          case 'v':
+            return '\v';
+          case '0':
+            return '\0';
+          case '\\':
+            return '\\';
+        }
+      }
+      return anyChar || '';
+    },
+  );
 }
 
 function routeRedirectTo(props: Map<string, string>): string | undefined {
