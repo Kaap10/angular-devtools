@@ -172,4 +172,55 @@ describe('overlay component tree traversal', () => {
     expect(nodes[0].children.length).toBe(1);
     expect(nodes[0].children[0].selector).toBe('app-child');
   });
+
+  it('falls back to walking document.body when window.ng is unavailable and roots is empty', () => {
+    delete (window as unknown as { ng?: AngularDebugApi }).ng;
+
+    document.body.innerHTML = `
+      <custom-widget>
+        <nested-item></nested-item>
+      </custom-widget>
+    `;
+
+    const nodes = collectComponentTree();
+    expect(nodes.length).toBe(1);
+    expect(nodes[0].selector).toBe('custom-widget');
+    expect(nodes[0].children.length).toBe(1);
+    expect(nodes[0].children[0].selector).toBe('nested-item');
+  });
+
+  it('serializes signal results and non-function plain fields in tryGetInputs', () => {
+    let arbitraryMethodCalled = false;
+    const signalFn = function signalValueFn() {
+      return { nested: 'value', count: 10 };
+    };
+
+    const regularMethod = () => {
+      arbitraryMethodCalled = true;
+      return 'should-not-run';
+    };
+
+    document.body.innerHTML = `<app-widget ng-version="19.0.0"></app-widget>`;
+    const widgetEl = document.querySelector('app-widget')!;
+
+    const mockComp = {
+      signalInput: signalFn,
+      plainObject: { theme: 'dark', active: true },
+      plainPrimitive: 'hello',
+      actionMethod: regularMethod,
+    };
+
+    (window as unknown as { ng?: AngularDebugApi }).ng = {
+      getComponent: (el: Element) => (el === widgetEl ? mockComp : null),
+    };
+
+    const nodes = collectComponentTree();
+    expect(nodes.length).toBe(1);
+    expect(nodes[0].inputs).toEqual({
+      signalInput: { nested: 'value', count: 10 },
+      plainObject: { theme: 'dark', active: true },
+      plainPrimitive: 'hello',
+    });
+    expect(arbitraryMethodCalled).toBe(false);
+  });
 });

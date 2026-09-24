@@ -85,9 +85,18 @@ export interface AngularDebugApi {
   ɵgetSignalGraph?(injector: unknown): unknown;
 }
 
+function findAngularElements(): Element[] {
+  const versionEls = Array.from(document.querySelectorAll('[ng-version]'));
+  const allEls = Array.from(document.querySelectorAll('*'));
+  const hostEls = allEls.filter((el) =>
+    Array.from(el.attributes).some((a) => a.name.startsWith('_nghost')),
+  );
+  return Array.from(new Set([...versionEls, ...hostEls]));
+}
+
 export function collectComponentTree() {
   const nodes: ComponentTreeNode[] = [];
-  const allRoots = Array.from(document.querySelectorAll('[ng-version], [_nghost-ng-c]'));
+  const allRoots = findAngularElements();
   const roots = allRoots.filter(
     (root) => !allRoots.some((other) => other !== root && other.contains(root)),
   );
@@ -95,13 +104,17 @@ export function collectComponentTree() {
   // Use Angular's debug utilities if available
   const ng = (window as unknown as { ng?: AngularDebugApi }).ng;
   if (ng?.getComponent) {
-    for (const root of roots) {
-      walkAngularTree(root, nodes, ng);
+    if (roots.length > 0) {
+      for (const root of roots) {
+        walkAngularTree(root, nodes, ng);
+      }
+    } else if (typeof document !== 'undefined' && document.body) {
+      walkAngularTree(document.body, nodes, ng);
     }
   } else {
     // Fallback: walk DOM for Angular component host elements
-    for (const root of roots) {
-      walkDom(root, nodes);
+    if (typeof document !== 'undefined' && document.body) {
+      walkDom(document.body, nodes);
     }
   }
 
@@ -142,7 +155,8 @@ export function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: Angul
 
 function walkDom(el: Element, out: ComponentTreeNode[]) {
   const tagName = el.tagName.toLowerCase();
-  const isComponent = tagName.includes('-') || el.hasAttribute('_nghost-ng-c');
+  const isComponent =
+    tagName.includes('-') || Array.from(el.attributes).some((a) => a.name.startsWith('_nghost'));
 
   if (isComponent) {
     const node: ComponentTreeNode = {
@@ -162,6 +176,13 @@ function walkDom(el: Element, out: ComponentTreeNode[]) {
   }
 }
 
+function isSignal(val: unknown): val is () => unknown {
+  if (typeof val !== 'function') return false;
+  if (val.name === 'signalValueFn') return true;
+  const symbols = Object.getOwnPropertySymbols(val);
+  return symbols.some((s) => s.description === 'SIGNAL' || s.toString().includes('SIGNAL'));
+}
+
 function tryGetInputs(component: unknown): Record<string, unknown> | undefined {
   if (!component || typeof component !== 'object') return undefined;
   try {
@@ -169,14 +190,14 @@ function tryGetInputs(component: unknown): Record<string, unknown> | undefined {
     const comp = component as Record<string, unknown>;
     for (const key of Object.keys(comp)) {
       const val = comp[key];
-      if (typeof val === 'function' && (val.name === 'signalValueFn' || val.length === 0)) {
+      if (isSignal(val)) {
         try {
-          inputs[key] = (val as () => unknown)();
+          inputs[key] = serializeValue(val());
         } catch {
           // skip
         }
       } else if (typeof val !== 'function') {
-        inputs[key] = val;
+        inputs[key] = serializeValue(val);
       }
     }
     return Object.keys(inputs).length > 0 ? inputs : undefined;
