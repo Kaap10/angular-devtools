@@ -79,25 +79,36 @@ export async function initOverlay() {
   };
 }
 
+export interface AngularDebugApi {
+  getComponent(el: Element): unknown;
+  getInjector?(el: Element): unknown;
+  ɵgetSignalGraph?(injector: unknown): unknown;
+}
+
 export function collectComponentTree() {
   const nodes: ComponentTreeNode[] = [];
-  const roots = document.querySelectorAll('[ng-version], [_nghost-ng-c]');
+  const allRoots = Array.from(document.querySelectorAll('[ng-version], [_nghost-ng-c]'));
+  const roots = allRoots.filter(
+    (root) => !allRoots.some((other) => other !== root && other.contains(root)),
+  );
 
   // Use Angular's debug utilities if available
-  const ng = (window as any).ng;
+  const ng = (window as unknown as { ng?: AngularDebugApi }).ng;
   if (ng?.getComponent) {
     for (const root of roots) {
       walkAngularTree(root, nodes, ng);
     }
   } else {
     // Fallback: walk DOM for Angular component host elements
-    walkDom(document.body, nodes);
+    for (const root of roots) {
+      walkDom(root, nodes);
+    }
   }
 
   return nodes;
 }
 
-interface ComponentTreeNode {
+export interface ComponentTreeNode {
   id: string;
   selector: string;
   tagName: string;
@@ -105,7 +116,7 @@ interface ComponentTreeNode {
   inputs?: Record<string, unknown>;
 }
 
-export function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: any) {
+export function walkAngularTree(el: Element, out: ComponentTreeNode[], ng: AngularDebugApi) {
   const component = ng.getComponent(el);
 
   if (component) {
@@ -151,13 +162,19 @@ function walkDom(el: Element, out: ComponentTreeNode[]) {
   }
 }
 
-function tryGetInputs(component: any): Record<string, unknown> | undefined {
+function tryGetInputs(component: unknown): Record<string, unknown> | undefined {
+  if (!component || typeof component !== 'object') return undefined;
   try {
     const inputs: Record<string, unknown> = {};
-    for (const key of Object.keys(component)) {
-      const val = component[key];
-      if (typeof val === 'function' && val.name === 'signalValueFn') {
-        inputs[key] = val();
+    const comp = component as Record<string, unknown>;
+    for (const key of Object.keys(comp)) {
+      const val = comp[key];
+      if (typeof val === 'function' && (val.name === 'signalValueFn' || val.length === 0)) {
+        try {
+          inputs[key] = (val as () => unknown)();
+        } catch {
+          // skip
+        }
       } else if (typeof val !== 'function') {
         inputs[key] = val;
       }

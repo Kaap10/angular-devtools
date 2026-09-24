@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { collectComponentTree, walkAngularTree } from '../overlay.ts';
+import {
+  AngularDebugApi,
+  ComponentTreeNode,
+  collectComponentTree,
+  walkAngularTree,
+} from '../overlay.ts';
 
 describe('overlay component tree traversal', () => {
   it('traverses direct component children', () => {
@@ -20,16 +25,16 @@ describe('overlay component tree traversal', () => {
     componentsMap.set(headerEl, { name: 'Header' });
     componentsMap.set(footerEl, { name: 'Footer' });
 
-    const mockNg = {
+    const mockNg: AngularDebugApi = {
       getComponent: (el: Element) => componentsMap.get(el) ?? null,
     };
 
-    const nodes: any[] = [];
+    const nodes: ComponentTreeNode[] = [];
     walkAngularTree(rootEl, nodes, mockNg);
 
     expect(nodes.length).toBe(1);
     expect(nodes[0].selector).toBe('app-root');
-    expect(nodes[0].children.map((c: any) => c.selector)).toEqual(['app-header', 'app-footer']);
+    expect(nodes[0].children.map((c) => c.selector)).toEqual(['app-header', 'app-footer']);
   });
 
   it('traverses through non-component HTML wrapper elements (fix for #11)', () => {
@@ -62,16 +67,16 @@ describe('overlay component tree traversal', () => {
     componentsMap.set(prodEl, { name: 'ProductList' });
     componentsMap.set(footEl, { name: 'Footer' });
 
-    const mockNg = {
+    const mockNg: AngularDebugApi = {
       getComponent: (el: Element) => componentsMap.get(el) ?? null,
     };
 
-    const nodes: any[] = [];
+    const nodes: ComponentTreeNode[] = [];
     walkAngularTree(rootEl, nodes, mockNg);
 
     expect(nodes.length).toBe(1);
     expect(nodes[0].selector).toBe('app-root');
-    expect(nodes[0].children.map((c: any) => c.selector)).toEqual([
+    expect(nodes[0].children.map((c) => c.selector)).toEqual([
       'app-navbar',
       'app-product-list',
       'app-footer',
@@ -100,11 +105,11 @@ describe('overlay component tree traversal', () => {
     componentsMap.set(cardEl, { name: 'Card' });
     componentsMap.set(itemEl, { name: 'CardItem' });
 
-    const mockNg = {
+    const mockNg: AngularDebugApi = {
       getComponent: (el: Element) => componentsMap.get(el) ?? null,
     };
 
-    const nodes: any[] = [];
+    const nodes: ComponentTreeNode[] = [];
     walkAngularTree(rootEl, nodes, mockNg);
 
     expect(nodes.length).toBe(1);
@@ -131,13 +136,40 @@ describe('overlay component tree traversal', () => {
     componentsMap.set(rootEl, { name: 'Root' });
     componentsMap.set(sidebarEl, { name: 'Sidebar' });
 
-    (window as any).ng = {
+    (window as unknown as { ng?: AngularDebugApi }).ng = {
       getComponent: (el: Element) => componentsMap.get(el) ?? null,
     };
 
     const nodes = collectComponentTree();
     expect(nodes.length).toBe(1);
     expect(nodes[0].selector).toBe('app-root');
-    expect(nodes[0].children.map((c: any) => c.selector)).toEqual(['app-sidebar']);
+    expect(nodes[0].children.map((c) => c.selector)).toEqual(['app-sidebar']);
+  });
+
+  it('deduplicates nested roots and avoids adding nested roots twice', () => {
+    document.body.innerHTML = `
+      <app-root ng-version="19.0.0">
+        <div class="container">
+          <app-child _nghost-ng-c10></app-child>
+        </div>
+      </app-root>
+    `;
+
+    const componentsMap = new Map<Element, unknown>();
+    const rootEl = document.querySelector('app-root')!;
+    const childEl = document.querySelector('app-child')!;
+
+    componentsMap.set(rootEl, { name: 'Root' });
+    componentsMap.set(childEl, { name: 'Child' });
+
+    (window as unknown as { ng?: AngularDebugApi }).ng = {
+      getComponent: (el: Element) => componentsMap.get(el) ?? null,
+    };
+
+    const nodes = collectComponentTree();
+    expect(nodes.length).toBe(1);
+    expect(nodes[0].selector).toBe('app-root');
+    expect(nodes[0].children.length).toBe(1);
+    expect(nodes[0].children[0].selector).toBe('app-child');
   });
 });
