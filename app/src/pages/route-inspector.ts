@@ -40,21 +40,12 @@ interface RouteInfo {
           </tr>
         </thead>
         <tbody>
-          @for (route of filtered(); track route.path + route.file) {
+          @for (route of filtered(); track $index) {
             <tr>
               <td class="path">/{{ route.path }}</td>
               <td>
                 @if (route.redirectTo !== undefined) {
-                  <span class="redirect"
-                    >➜
-                    {{
-                      route.redirectTo
-                        ? route.redirectTo.startsWith('/')
-                          ? route.redirectTo
-                          : '/' + route.redirectTo
-                        : '/'
-                    }}</span
-                  >
+                  <span class="redirect">➜ {{ route.redirectTo }}</span>
                 } @else {
                   {{ route.component ?? '—' }}
                 }

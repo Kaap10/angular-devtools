@@ -99,7 +99,7 @@ function walk(dir: string, cwd: string, out: ProviderEntry[]) {
 
     try {
       const content = readFileSync(full, 'utf-8');
-      const relPath = relative(cwd, full).replaceAll('\\', '/');
+      const relPath = relative(cwd, full);
 
       // @Injectable({ providedIn: 'root' }) or @Service (with or without parens)
       for (const match of content.matchAll(

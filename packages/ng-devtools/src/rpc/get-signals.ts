@@ -99,9 +99,7 @@ function walk(dir: string, cwd: string, out: SignalEntry[]) {
     if (!item.endsWith('.ts') || item.endsWith('.spec.ts') || item.endsWith('.d.ts')) continue;
 
     try {
-      out.push(
-        ...signalsIn(readFileSync(full, 'utf-8'), relative(cwd, full).replaceAll('\\', '/')),
-      );
+      out.push(...signalsIn(readFileSync(full, 'utf-8'), relative(cwd, full)));
     } catch {
       // skip
     }

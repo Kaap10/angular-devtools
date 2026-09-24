@@ -20,14 +20,7 @@ describe('get-routes', () => {
   it('reads an eager component', async () => {
     const routes = await routesFor(`[{ path: 'about', component: AboutComponent }]`);
     expect(routes).toEqual([
-      {
-        path: 'about',
-        component: 'AboutComponent',
-        redirectTo: undefined,
-        title: undefined,
-        hasChildren: false,
-        file: 'src/app.routes.ts',
-      },
+      { path: 'about', component: 'AboutComponent', hasChildren: false, file: 'src/app.routes.ts' },
     ]);
   });
 
@@ -71,16 +64,13 @@ describe('get-routes', () => {
     expect(routes).toEqual([
       {
         path: '',
-        component: undefined,
         redirectTo: 'home',
-        title: undefined,
         hasChildren: false,
         file: 'src/app.routes.ts',
       },
       {
         path: 'home',
         component: 'HomeComponent',
-        redirectTo: undefined,
         title: 'Home',
         hasChildren: false,
         file: 'src/app.routes.ts',
@@ -88,7 +78,6 @@ describe('get-routes', () => {
       {
         path: 'dashboard',
         component: 'DashboardComponent',
-        redirectTo: undefined,
         title: 'Dashboard',
         hasChildren: true,
         file: 'src/app.routes.ts',
@@ -96,22 +85,79 @@ describe('get-routes', () => {
       {
         path: 'stats',
         component: 'StatsComponent',
-        redirectTo: undefined,
-        title: undefined,
         hasChildren: false,
         file: 'src/app.routes.ts',
       },
     ]);
   });
 
-  it('handles function or expression title / redirectTo gracefully', async () => {
+  it('marks function or expression title / redirectTo as (dynamic)', async () => {
     const routes = await routesFor(`[
       { path: 'custom-title', component: HomeComponent, title: customTitleResolver },
       { path: 'custom-redirect', redirectTo: () => '/fallback' },
+      { path: 'template-title', component: HomeComponent, title: \`Home \${id}\` },
     ]`);
     expect(routes.map((r) => [r.path, r.title, r.redirectTo])).toEqual([
-      ['custom-title', undefined, undefined],
-      ['custom-redirect', undefined, undefined],
+      ['custom-title', '(dynamic)', undefined],
+      ['custom-redirect', undefined, '(dynamic)'],
+      ['template-title', '(dynamic)', undefined],
+    ]);
+  });
+
+  it('handles string literal escapes, unescapes, and concatenated non-literals', async () => {
+    const routes = await routesFor(`[
+      { path: 'about', title: 'It\\'s "special"', redirectTo: "my/\\"path\\"" },
+      { path: 'a' + 'b', component: Nope },
+    ]`);
+    expect(routes).toEqual([
+      {
+        path: 'about',
+        title: 'It\'s "special"',
+        redirectTo: 'my/"path"',
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+    ]);
+  });
+
+  it('reads redirectTo and title on nested child routes and wildcard routes', async () => {
+    const routes = await routesFor(`[
+      {
+        path: 'admin',
+        title: 'Admin Panel',
+        children: [
+          { path: '', redirectTo: 'overview', pathMatch: 'full' },
+          { path: 'overview', component: AdminOverview, title: 'Overview' },
+        ],
+      },
+      { path: '**', redirectTo: '' },
+    ]`);
+    expect(routes).toEqual([
+      {
+        path: 'admin',
+        title: 'Admin Panel',
+        hasChildren: true,
+        file: 'src/app.routes.ts',
+      },
+      {
+        path: '',
+        redirectTo: 'overview',
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+      {
+        path: 'overview',
+        component: 'AdminOverview',
+        title: 'Overview',
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
+      {
+        path: '**',
+        redirectTo: '',
+        hasChildren: false,
+        file: 'src/app.routes.ts',
+      },
     ]);
   });
 

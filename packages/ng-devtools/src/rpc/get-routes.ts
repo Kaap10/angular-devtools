@@ -69,8 +69,8 @@ function findRouteFiles(dir: string, cwd: string, routes: ExtractedRoute[]) {
         routes.push({
           path,
           component: routeComponent(props),
-          redirectTo: stringLiteral(props.get('redirectTo')),
-          title: stringLiteral(props.get('title')),
+          redirectTo: routeRedirectTo(props),
+          title: routeTitle(props),
           hasChildren: props.has('children'),
           file: relPath,
         });
@@ -81,9 +81,28 @@ function findRouteFiles(dir: string, cwd: string, routes: ExtractedRoute[]) {
   }
 }
 
-function stringLiteral(value?: string): string | undefined {
-  const match = value?.match(/^(['"`])([\s\S]*)\1$/);
-  return match?.[2];
+function stringLiteral(v?: string): string | undefined {
+  if (!v) return undefined;
+  const quote = v[0];
+  if (quote !== "'" && quote !== '"' && quote !== '`') return undefined;
+  if (skipString(v, 0) !== v.length - 1) return undefined;
+  if (quote === '`' && v.includes('${')) return undefined;
+  const raw = v.slice(1, -1);
+  return raw.replace(/\\(.)/g, '$1');
+}
+
+function routeRedirectTo(props: Map<string, string>): string | undefined {
+  const val = props.get('redirectTo');
+  if (val === undefined) return undefined;
+  const literal = stringLiteral(val);
+  return literal !== undefined ? literal : '(dynamic)';
+}
+
+function routeTitle(props: Map<string, string>): string | undefined {
+  const val = props.get('title');
+  if (val === undefined) return undefined;
+  const literal = stringLiteral(val);
+  return literal !== undefined ? literal : '(dynamic)';
 }
 
 function routeComponent(props: Map<string, string>): string | undefined {
