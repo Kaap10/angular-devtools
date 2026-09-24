@@ -86,7 +86,7 @@ function stringLiteral(v?: string): string | undefined {
   const quote = v[0];
   if (quote !== "'" && quote !== '"' && quote !== '`') return undefined;
   if (skipString(v, 0) !== v.length - 1) return undefined;
-  if (quote === '`' && v.includes('${')) return undefined;
+  if (quote === '`' && /(^|[^\\])(?:\\\\)*\$\{/.test(v)) return undefined;
   const raw = v.slice(1, -1);
   return decodeEscapes(raw);
 }
@@ -94,7 +94,13 @@ function stringLiteral(v?: string): string | undefined {
 function decodeEscapes(str: string): string {
   return str.replace(
     /\\(?:(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})|([nrtbfv0\\])|(\r\n|[\r\n\u2028\u2029])|(.))/g,
-    (_, hex, char, lineCont, anyChar) => {
+    (
+      _: string,
+      hex: string | undefined,
+      char: string | undefined,
+      lineCont: string | undefined,
+      anyChar: string | undefined,
+    ) => {
       if (hex) return String.fromCharCode(parseInt(hex.slice(1), 16));
       if (lineCont) return '';
       if (char) {
