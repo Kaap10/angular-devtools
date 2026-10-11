@@ -1448,9 +1448,7 @@ export class FormsInspector {
 
   readonly selectedEvents = computed(() => {
     const id = this.selected()?.id;
-    return this.events()
-      .filter((e) => e.formId === id)
-      .slice(-200);
+    return this.events().filter((e) => e.formId === id);
   });
 
   constructor() {
