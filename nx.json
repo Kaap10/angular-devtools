@@ -9,6 +9,7 @@
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": ["default"]
   },
+  "nxCloudId": "6acb321e8ad7d9bfe6d9d23e",
   "plugins": [
     {
       "plugin": "@nx/vite/plugin",
@@ -30,6 +31,5 @@
       }
     }
   ],
-  "nxCloudId": "6ababfaa6b3b7cbe16499a58",
   "analytics": true
 }

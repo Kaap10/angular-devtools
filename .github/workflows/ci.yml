@@ -29,6 +29,8 @@ jobs:
 
       - uses: nrwl/nx-set-shas@v4
 
+      - uses: nrwl/nx-set-shas@v4
+
       - name: Check formatting
         run: pnpm format:check
 
