@@ -44,4 +44,38 @@ describe('impure-pipe-in-for block matching', () => {
     const template = `@for (item of items; track item) { {{ item.map | keyvalue }} }`;
     expect(lintFor(template).map((f) => f.pipe)).toEqual(['keyvalue']);
   });
+
+  it('flags an impure pipe inside an *ngFor element', () => {
+    const template = `<ul><li *ngFor="let i of items" [title]="i | slow"><b>{{ i | slow }}</b></li></ul>`;
+    const findings = lintFor(template);
+    expect(findings).toHaveLength(2);
+    expect(findings[0].message).toContain('*ngFor');
+  });
+
+  it('stops an *ngFor element at its matching end tag', () => {
+    const template = `<div *ngFor="let i of items"><div>{{ i }}</div></div><p>{{ title | slow }}</p>`;
+    expect(lintFor(template)).toEqual([]);
+  });
+
+  it('handles a self-closing *ngFor element', () => {
+    const template = `<app-row *ngFor="let r of rows" [label]="r | slow" /><p>{{ title | slow }}</p>`;
+    expect(lintFor(template)).toHaveLength(1);
+  });
+
+  it('finds an *ngFor element whose earlier attributes contain a bare <', () => {
+    const hidden = `<ul><li [hidden]="n < 2" *ngFor="let x of xs">{{ x | slow }}</li></ul>`;
+    expect(lintFor(hidden)).toHaveLength(1);
+    const compare = `<li [x]="a<b" *ngFor="let x of xs">{{ x }}</li><p>{{ title | slow }}</p>`;
+    expect(lintFor(compare)).toEqual([]);
+  });
+
+  it('does not end an *ngFor element at an end tag inside an attribute value', () => {
+    const template = `<li *ngFor="let x of xs"><span title="</li>">{{ x | slow }}</span></li>`;
+    expect(lintFor(template)).toHaveLength(1);
+  });
+
+  it('does not take *ngFor inside an attribute value for the directive', () => {
+    const template = `<p title="use *ngFor = here">{{ title | slow }}</p>`;
+    expect(lintFor(template)).toEqual([]);
+  });
 });
