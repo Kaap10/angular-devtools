@@ -1,9 +1,12 @@
 import { connectDevframe } from 'devframe/client';
+import { overlayPopup } from './overlay-popup.ts';
+import { overlayConnectOptions, warnOnConnectionTrouble } from './overlay-connection.ts';
 export { registerNgrxSignals } from './ngrx-register.ts';
 import { attachAnalog } from './analog-runtime.ts';
 import { attachForms } from './forms-collector.ts';
 import { attachPipes } from './pipes-collector.ts';
 import { attachHttp } from './http-overlay.ts';
+import { attachCapacitor } from './capacitor-overlay.ts';
 import { allowClientRules, httpRegistry } from './http-rules.ts';
 import { attachNgrx } from './ngrx-overlay.ts';
 import { collectInjectorTree } from './injector-tree.ts';
@@ -61,7 +64,7 @@ import {
 } from './change-detection.ts';
 import { attachChangeDetection } from './cd-overlay.ts';
 import { createScanBackoff } from './router-attach.ts';
-import { SETUP_URL, insideDevtoolsPanel } from './panel-frame.ts';
+import { SETUP_URL } from './panel-frame.ts';
 import { clearHighlight, showHighlight } from './page-highlight.ts';
 
 declare global {
@@ -119,12 +122,37 @@ async function claimPageId(): Promise<{ id: string; release: () => void }> {
   return { id, release: () => channel.close() };
 }
 
-interface OverlayOptions {
+type DevframeConnectionMeta = NonNullable<
+  NonNullable<Parameters<typeof connectDevframe>[0]>['connectionMeta']
+>;
+
+/**
+ * The content of a devtools server's `__connection.json`. `configs` is loose,
+ * so the whole file, with its `pangular` config, can be passed as it is.
+ */
+export type OverlayConnectionMeta = Omit<DevframeConnectionMeta, 'configs' | 'backend'> & {
+  /** A string, so an imported `__connection.json` type-checks as it is. */
+  backend: string;
+  configs?: Record<string, unknown>;
+};
+
+export interface OverlayOptions {
+  /** Where the devtools server is, or a list of places to try in order. */
   baseURL?: string | string[];
+  /**
+   * The server's `__connection.json`, passed in so the overlay does not fetch
+   * it. Use it when the page runs on another origin than the server, such as a
+   * Capacitor WebView, where that fetch is blocked.
+   */
+  connectionMeta?: OverlayConnectionMeta;
+  /**
+   * A pairing token the server trusts (`auth: {tokens}`, or `--auth-token` on
+   * the CLI), so the page skips the one-time code. A dev secret: don't commit it.
+   */
+  authToken?: string;
 }
 
 let current: { stop: () => void } | null = null;
-let popup: Promise<typeof import('./popup.ts')> | undefined;
 
 /**
  * Starts the overlay and resolves with its dispose. Only one overlay runs per
@@ -168,7 +196,7 @@ export function initOverlay(options: OverlayOptions = {}): Promise<() => void> {
 /** Stops the running overlay and removes the floating devtools button. */
 export async function disposeOverlay(): Promise<void> {
   current?.stop();
-  const loaded = await popup?.catch(() => undefined);
+  const loaded = await overlayPopup()?.catch(() => undefined);
   await loaded?.hideDevtools();
 }
 
@@ -176,25 +204,45 @@ export async function disposeOverlay(): Promise<void> {
 // misses the documented `/__pangular/` mount in a host app.
 const DEFAULT_BASES = ['./', '/__pangular/', '/__devframes/pangular/'];
 
-function noServerError(bases: string | string[], cause: unknown): Error {
+const SERVER_HINT =
+  'Mount initPangularHub() or the pangular() Vite plugin in your dev server, before the SSR handler. ' +
+  `On a custom path, pass it to initOverlay({baseURL}). See ${SETUP_URL}`;
+const DEVICE_HINT =
+  "From an app on a device, check that the server listens on the network (--host 0.0.0.0) and allows the app's origin, and that the WebView may load http: an https page blocks it as mixed content, and Android blocks cleartext unless the app allows it. See https://pangular-inspector.dev/guides/capacitor/";
+
+/**
+ * `manual`: the overlay was given `connectionMeta`, so only the device and
+ * network hints apply. `device`: it runs in a Capacitor WebView without it,
+ * which may be live reload from the dev server, so it gets both hints.
+ */
+function noServerError(
+  bases: string | string[],
+  cause: unknown,
+  { device, manual }: { device: boolean; manual: boolean },
+): Error {
   const tried = (Array.isArray(bases) ? bases : [bases]).join(', ');
-  return new Error(
-    `[pangular] No devtools server found (tried ${tried}). ` +
-      'Mount initPangularHub() or the pangular() Vite plugin in your dev server, before the SSR handler. ' +
-      `On a custom path, pass it to initOverlay({baseURL}). See ${SETUP_URL}`,
-    { cause },
-  );
+  const hints = manual ? DEVICE_HINT : device ? `${SERVER_HINT} ${DEVICE_HINT}` : SERVER_HINT;
+  return new Error(`[pangular] No devtools server found (tried ${tried}). ${hints}`, { cause });
 }
 
 async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) => boolean) {
   const bases = options.baseURL ?? DEFAULT_BASES;
-  const rpc = await connectDevframe({ baseURL: bases }).catch((error: unknown) => {
-    throw noServerError(bases, error);
-  });
+  const where = {
+    device: !!(globalThis as { Capacitor?: unknown }).Capacitor,
+    manual: !!options.connectionMeta,
+  };
+  const rpc = await connectDevframe(overlayConnectOptions(options, DEFAULT_BASES)).catch(
+    (error: unknown) => {
+      throw noServerError(bases, error, where);
+    },
+  );
   if (!own(() => rpc.close?.())) return;
+  if (!own(warnOnConnectionTrouble(rpc, options))) return;
   const metaUrl = rpc.connection?.metaBaseUrl;
   if (metaUrl) {
-    void popup?.then((m) => m.useDevtoolsBase(new URL('.', metaUrl).href)).catch(() => {});
+    void overlayPopup()
+      ?.then((m) => m.useDevtoolsBase(new URL('.', metaUrl).href))
+      .catch(() => {});
   }
   const my = rpc.scope('pangular');
   const devtoolsConfig = configFromConnection(rpc.connectionMeta);
@@ -342,6 +390,13 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     : null;
   const pipes = on.pipes ? attachPipes(my, pageId, getNg) : null;
   const http = on.http ? attachHttp(my, pageId, tickMs) : null;
+  const capacitor = on.capacitor
+    ? attachCapacitor(my, pageId, {
+        maxCalls: limits.capacitorCalls,
+        tickMs: limits.refreshMs,
+        devtoolsUrl: metaUrl,
+      })
+    : null;
   const cd = on.components
     ? attachChangeDetection(my, pageId, getNg, limits.cdCycles, tickMs)
     : null;
@@ -687,6 +742,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     lastInjectorJson = '';
     forget('injectors', 'forget-injector-page');
     http?.leave();
+    capacitor?.leave();
     forget('analog', 'forget-analog-page');
     ngrx?.leave();
   };
@@ -694,6 +750,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   const resendConfig = () => {
     sentGeneration = -1;
     pipes?.resume();
+    capacitor?.resume();
     left = false;
     onVisibility();
   };
@@ -709,6 +766,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     leave();
     forms?.stop();
     pipes?.stop();
+    capacitor?.stop();
     ngrx?.stop();
     cd?.stop();
     stopAnalog();
@@ -753,15 +811,4 @@ function read<T>(fn: () => T, fallback: T): T {
 
 function getNg(): any {
   return (window as any).ng;
-}
-
-// Auto-init when loaded as a script (skip during test environment)
-if (
-  typeof document !== 'undefined' &&
-  !(typeof process !== 'undefined' && process.env?.['VITEST']) &&
-  !insideDevtoolsPanel()
-) {
-  initOverlay().catch(console.error);
-  popup = import('./popup.ts');
-  popup.then((m) => m.showDevtools()).catch(console.error);
 }

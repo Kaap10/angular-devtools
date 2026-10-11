@@ -201,6 +201,7 @@ const config: NgmdConfig = {
         {label: 'Pipes', href: '/inspectors/pipes', status: 'new'},
         {label: 'SSR & HTTP', href: '/inspectors/ssr-http', status: 'new'},
         {label: 'Analog', href: '/inspectors/analog', status: 'new'},
+        {label: 'Capacitor', href: '/inspectors/capacitor', status: 'new'},
       ],
     },
     {
@@ -219,6 +220,7 @@ const config: NgmdConfig = {
         {label: 'Set up Analog', href: '/guides/analog'},
         {label: 'Set up NativeScript', href: '/guides/nativescript'},
         {label: 'Set up Angular Native', href: '/guides/angular-native'},
+        {label: 'Set up Capacitor', href: '/guides/capacitor', status: 'new'},
       ],
     },
     {

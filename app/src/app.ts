@@ -28,6 +28,8 @@ import type { ComponentFocus } from './types/component-focus.types';
 import { AnalogInspector } from './pages/analog-inspector';
 import { NetworkInspector } from './pages/network-inspector';
 import { ComingSoon, type ComingSoonInfo } from './pages/coming-soon';
+import { CapacitorInspector } from './pages/capacitor-inspector';
+import { capacitorPages } from './pages/capacitor-types';
 import { TabIcon } from './pages/tab-icon';
 import { styleHubRail } from './hub-rail-style';
 import { ThemeService } from './theme.service';
@@ -60,28 +62,18 @@ const VIEW_TITLE: Record<View, string> = {
   capacitor: 'Capacitor',
 };
 
-const VIEW_TAB: Partial<Record<View, Tab>> = { ngrx: 'store', analog: 'analog' };
-const TAB_VIEW: Partial<Record<Tab, View>> = { store: 'ngrx', analog: 'analog' };
+const VIEW_TAB: Partial<Record<View, Tab>> = {
+  ngrx: 'store',
+  analog: 'analog',
+  capacitor: 'capacitor',
+};
+const TAB_VIEW: Partial<Record<Tab, View>> = {
+  store: 'ngrx',
+  analog: 'analog',
+  capacitor: 'capacitor',
+};
 const VIEW_TABS: Partial<Record<View, Tab[]>> = {
   'angular-native': ['components', 'signals', 'injectors', 'store', 'pipes'],
-};
-
-const COMING_SOON: Partial<Record<View, ComingSoonInfo>> = {
-  capacitor: {
-    id: 'capacitor',
-    name: 'Capacitor',
-    badge: 'Coming Soon',
-    heading: 'Capacitor Support',
-    summary: 'Connect Ionic and Capacitor apps running in a device WebView back to these tools.',
-    color: '#119eff',
-    plans: [
-      'Manual overlay start for apps that load from capacitor:// or a device',
-      'Connection settings passed in, no cross-origin probing',
-      'Setup guides for the Android emulator and iOS simulator',
-    ],
-    pr: 21,
-    author: { name: 'Erkam Yaman', login: 'erkamyaman' },
-  },
 };
 
 const NATIVESCRIPT_SETUP: ComingSoonInfo = {
@@ -101,6 +93,26 @@ const NATIVESCRIPT_SETUP: ComingSoonInfo = {
   link: {
     label: 'NativeScript setup guide',
     href: 'https://pangular-inspector.dev/guides/nativescript/',
+  },
+};
+
+const CAPACITOR_SETUP: ComingSoonInfo = {
+  id: 'capacitor',
+  name: 'Capacitor',
+  badge: 'Available',
+  heading: 'Inspect Capacitor apps',
+  summary:
+    'An Ionic or Capacitor app runs the browser overlay in its WebView and reports to this server, so it shows up in the Angular dock like a browser tab.',
+  color: '#119eff',
+  plansTitle: 'Set up an app',
+  plans: [
+    'With live reload on localhost, load @pangular-inspector/devtools/overlay as in a browser',
+    'In a bundled build, call initOverlay() from @pangular-inspector/devtools/overlay-manual with this server’s address and connectionMeta',
+    'Run the app, then come back here for its plugin calls, or open the Angular dock',
+  ],
+  link: {
+    label: 'Capacitor setup guide',
+    href: 'https://pangular-inspector.dev/guides/capacitor/',
   },
 };
 
@@ -162,6 +174,7 @@ function readView(): View | null {
     PipesInspector,
     AnalogInspector,
     NetworkInspector,
+    CapacitorInspector,
     ComingSoon,
     TabIcon,
   ],
@@ -422,6 +435,9 @@ function readView(): View | null {
             }
             @case ('analog') {
               <app-analog-inspector [rpc]="rpc()" />
+            }
+            @case ('capacitor') {
+              <app-capacitor-inspector [rpc]="rpc()" />
             }
           }
         }
@@ -766,6 +782,7 @@ export class App implements OnInit, OnDestroy {
     { id: 'forms', label: 'Forms' },
     { id: 'pipes', label: 'Pipes' },
     { id: 'network', label: 'SSR & HTTP' },
+    { id: 'capacitor', label: 'Capacitor' },
   ];
   readonly view = signal<View | null>(readView());
   readonly viewAccent = computed(() => viewAccent(this.view(), this.themeService.current()));
@@ -777,6 +794,10 @@ export class App implements OnInit, OnDestroy {
     () => this.availableTabs().find((t) => t.id === this.tab())?.label ?? this.title(),
   );
   readonly analogKnown = signal(false);
+  /** Whether a Capacitor app reports, so the Capacitor tab has something to show. */
+  readonly capacitorReporting = signal(false);
+  /** Whether the panel has read the Capacitor state yet, so the setup steps don't flash first. */
+  readonly capacitorKnown = signal(false);
   readonly nativePageId = signal<string | null>(null);
   readonly nativeKnown = signal(false);
   protected readonly scopeKey = computed(() =>
@@ -786,10 +807,17 @@ export class App implements OnInit, OnDestroy {
     const view = this.view();
     if (view === 'analog') return this.analogKnown() && !this.analog() ? NOT_ANALOG : undefined;
     if (view === 'nativescript') return NATIVESCRIPT_SETUP;
+    if (view === 'capacitor') {
+      return this.config().inspectors.capacitor &&
+        this.capacitorKnown() &&
+        !this.capacitorReporting()
+        ? CAPACITOR_SETUP
+        : undefined;
+    }
     if (view === 'angular-native') {
       return this.nativeKnown() && !this.nativePageId() ? NO_ANGULAR_NATIVE : undefined;
     }
-    return view ? COMING_SOON[view] : undefined;
+    return undefined;
   });
   readonly config = computed(() => panelConfig(this.rpc()));
   protected readonly tabEnabled = tabEnabled;
@@ -802,7 +830,10 @@ export class App implements OnInit, OnDestroy {
     const some = view ? VIEW_TABS[view] : undefined;
     if (some) return enabled.filter((t) => some.includes(t.id));
     return enabled.filter(
-      (t) => (t.id !== 'analog' || this.analog()) && !(view === 'angular' && TAB_VIEW[t.id]),
+      (t) =>
+        (t.id !== 'analog' || this.analog()) &&
+        (t.id !== 'capacitor' || this.capacitorReporting()) &&
+        !(view === 'angular' && TAB_VIEW[t.id]),
     );
   });
   readonly tabs = computed(() => {
@@ -833,6 +864,7 @@ export class App implements OnInit, OnDestroy {
   });
   private stopVisibility = () => {};
   private stopNative = () => {};
+  private stopCapacitor = () => {};
 
   private stopFollowing = () => {};
   private stopHighlights = () => {};
@@ -903,6 +935,12 @@ export class App implements OnInit, OnDestroy {
     if (restored) this.tab.set(restored);
     else if (
       !this.view() &&
+      initialTab(location.hash, storedTab(this.tabScope()), ['capacitor']) === 'capacitor'
+    ) {
+      // The tab exists once a Capacitor app reports; watchCapacitor opens it then.
+      this.restoreCapacitor = true;
+    } else if (
+      !this.view() &&
       initialTab(location.hash, storedTab(this.tabScope()), ['analog']) === 'analog'
     ) {
       this.restoreAnalog = true;
@@ -916,6 +954,7 @@ export class App implements OnInit, OnDestroy {
         this.connected.set(true);
         void this.watchVisibility(client);
         void this.watchAngularNative(client);
+        void this.watchCapacitor(client);
         const scoped = client.scope('pangular').rpc as unknown as {
           call: (name: string) => Promise<unknown>;
         };
@@ -950,6 +989,7 @@ export class App implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.stopNative();
+    this.stopCapacitor();
     this.stopFollowing();
     this.stopVisibility();
     this.stopHighlights();
@@ -1006,9 +1046,11 @@ export class App implements OnInit, OnDestroy {
   }
 
   private restoreAnalog = false;
+  private restoreCapacitor = false;
 
   private setTab(id: Tab) {
     this.restoreAnalog = false;
+    this.restoreCapacitor = false;
     this.keepFocus();
     this.tab.set(id);
     storeTab(this.tabScope(), id);
@@ -1033,6 +1075,30 @@ export class App implements OnInit, OnDestroy {
       this.stopNative = state.on('updated', apply);
     } catch {
       this.nativeKnown.set(true);
+    }
+  }
+
+  private async watchCapacitor(client: DevframeRpcClient) {
+    try {
+      const state = await client.scope('pangular').rpc.sharedState('capacitor');
+      const apply = (value: unknown) => {
+        // A state the client hasn't loaded from the server yet says nothing.
+        if (value === undefined) return;
+        const reporting = capacitorPages(value).length > 0;
+        this.capacitorReporting.set(reporting);
+        this.capacitorKnown.set(true);
+        if (reporting && this.restoreCapacitor && tabEnabled('capacitor', this.config())) {
+          this.restoreCapacitor = false;
+          this.tab.set('capacitor');
+        }
+        if (!reporting && this.tab() === 'capacitor' && !this.view()) this.tab.set('dashboard');
+      };
+      apply(state.value());
+      this.stopCapacitor();
+      this.stopCapacitor = state.on('updated', apply);
+    } catch {
+      this.capacitorReporting.set(false);
+      this.capacitorKnown.set(true);
     }
   }
 

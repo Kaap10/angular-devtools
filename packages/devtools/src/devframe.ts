@@ -1,9 +1,21 @@
 import type { DevframeSetupInfo, RemoteAssets } from 'devframe';
 import { defineDevframe } from 'devframe';
+import { createSharedState } from 'devframe/utils/shared-state';
 import { PANGULAR_LOGO_DATA_URI } from './brand.ts';
 import { getRoutes } from './rpc/get-routes.ts';
 import { getComponents } from './rpc/get-components.ts';
 import { getPipes } from './rpc/get-pipes.ts';
+import {
+  capacitorCallsText,
+  capacitorPluginsText,
+  expireCapacitorPages,
+  mergeCapacitorReport,
+  patchCapacitorState,
+  syncCapacitorState,
+  toCapacitorReport,
+  type CapacitorPage,
+  type CapacitorState,
+} from './rpc/capacitor-tools.ts';
 import { inspectProvidersText } from './rpc/injector-tools.ts';
 import { lintPipes, lintPipesText } from './rpc/pipe-lint.ts';
 import { explainPipeOnPage, pipeRecordRequest, pipeRecordText } from './rpc/pipes-agent.ts';
@@ -192,7 +204,16 @@ import {
 
 export * from './config.ts';
 
+import { registerAuthTokens } from './auth-tokens.ts';
 import pkg from '../package.json' with { type: 'json' };
+
+type CapacitorToolArgs = {
+  page?: string;
+  plugin?: string;
+  failed?: boolean;
+  slowMs?: number;
+  limit?: number;
+};
 
 type PageGraph = SignalGraph & { pageId?: string };
 
@@ -483,6 +504,50 @@ const pangular = defineDevframe({
       handler: () => lintPipes(ctx.cwd),
     });
 
+    const capacitorPages = new Map<string, CapacitorPage>();
+    // With patches on, a push sends the panel what changed, not every page:
+    // devframe's own shared states send the whole value on each change.
+    const capacitorShared = await my.rpc.sharedState('capacitor', {
+      sharedState: createSharedState<CapacitorState>({
+        initialValue: { pages: {} },
+        enablePatches: true,
+      }),
+    });
+    const applyCapacitor = () =>
+      capacitorShared.mutate((draft) => syncCapacitorState(draft, capacitorPages));
+    const capacitorSessions = trackPageSessions(ctx.rpc, (pageIds) => {
+      let removed = false;
+      for (const pageId of pageIds) removed = capacitorPages.delete(pageId) || removed;
+      if (removed) applyCapacitor();
+    });
+
+    register({
+      name: 'push-capacitor',
+      type: 'action',
+      jsonSerializable: true,
+      handler: (message: unknown) => {
+        const report = toCapacitorReport(message);
+        if (!report) return { known: true };
+        capacitorSessions.bind(report.pageId);
+        const answer = mergeCapacitorReport(capacitorPages, report, limits.capacitorCalls);
+        if (answer.known) {
+          capacitorShared.mutate((draft) => patchCapacitorState(draft, capacitorPages, report));
+        }
+        return answer;
+      },
+    });
+
+    register({
+      name: 'forget-capacitor-page',
+      type: 'action',
+      jsonSerializable: true,
+      handler: (pageId: string) => {
+        if (typeof pageId !== 'string') return;
+        capacitorSessions.unbind(pageId);
+        if (capacitorPages.delete(pageId)) applyCapacitor();
+      },
+    });
+
     const routerPages = new Map<string, RouterPage>();
     const routerState = await my.rpc.sharedState('router', {
       initialValue: { pages: [] } as RouterState,
@@ -547,7 +612,10 @@ const pangular = defineDevframe({
         const requestId = `a${++actionSeq}`;
         const timer = setTimeout(() => {
           pendingActions.delete(requestId);
-          resolve({ error: 'No page answered within 15s. Is the app open in a browser?' });
+          resolve({
+            error:
+              'No page answered within 15s. Is the app open in a browser, or the device app in the foreground?',
+          });
         }, 15_000);
         timer.unref?.();
         pendingActions.set(requestId, (result) => {
@@ -894,6 +962,7 @@ const pangular = defineDevframe({
       const nextPipes = expirePipePages(pipePages, Date.now(), liveTtl);
       if (nextPipes) applyPipes(nextPipes);
       if (expireNgrxPages(ngrxPages, Date.now(), liveTtl)) applyNgrx();
+      if (expireCapacitorPages(capacitorPages, Date.now(), liveTtl)) applyCapacitor();
     }, 5000);
     expiry.unref?.();
     registry.owner = ctx;
@@ -976,6 +1045,40 @@ const pangular = defineDevframe({
         preview?: boolean;
       }) => ({
         markdown: listHttpCallsText(httpSnapshot(), { ...args, page: pageArgument(args) }),
+      }),
+    });
+
+    agent.registerTool({
+      id: 'pangular:list-capacitor-calls',
+      description:
+        'Capacitor plugin calls the app made, newest first: plugin and method, whether it went to the native bridge or a web implementation answered it, the arguments, the result or the error, and the duration. Callback methods such as watchPosition show as streams with their callback count. Failed calls show the error code, and calls the platform does not implement are marked **not implemented**. Ends with the active plugin listeners, how many events each received, and the masked payload of the last one (only the last event is kept). Native calls are logged on iOS and Android; calls a web implementation answers are logged only when the app loads `@pangular-inspector/devtools/capacitor-hook` before @capacitor/core. Arguments, results and errors are masked like other live values. Empty when no Capacitor app reports.',
+      safety: 'read',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          page: PAGE_ARGUMENT,
+          plugin: { type: 'string', description: 'Only calls to this plugin, such as Camera.' },
+          failed: { type: 'boolean', description: 'Only calls that failed.' },
+          slowMs: {
+            type: 'integer',
+            description: 'Only calls that took at least this many milliseconds.',
+          },
+          limit: { type: 'integer', description: 'How many calls to list (1-200, default 30).' },
+        },
+      },
+      handler: async (args: CapacitorToolArgs) => ({
+        markdown: capacitorCallsText(capacitorPages, { ...args, page: pageArgument(args) }),
+      }),
+    });
+
+    agent.registerTool({
+      id: 'pangular:list-capacitor-plugins',
+      description:
+        'The Capacitor environment of the app and its plugins: platform, server URL, whether CapacitorHttp and native logging are on, the WebView user agent, and each plugin with whether it is available on this platform, imported by the app, installed natively, and its native methods. Flags plugins the app imports that are not available (run `npx cap sync`) and native plugins the app does not import. Empty when no Capacitor app reports.',
+      safety: 'read',
+      inputSchema: { type: 'object', properties: { page: PAGE_ARGUMENT } },
+      handler: async (args: { page?: string }) => ({
+        markdown: capacitorPluginsText(capacitorPages, { page: pageArgument(args) }),
       }),
     });
 
@@ -1127,7 +1230,7 @@ const pangular = defineDevframe({
           pendingFormActions.delete(requestId);
           resolve({
             ok: false,
-            error: `No page answered within ${Math.round(timeoutMs / 1000)}s. Is the app open in a browser, with that form on screen?`,
+            error: `No page answered within ${Math.round(timeoutMs / 1000)}s. Is the app open in a browser (or the device app in the foreground), with that form on screen?`,
           });
         }, timeoutMs);
         timer.unref?.();
@@ -1365,7 +1468,11 @@ const pangular = defineDevframe({
           const requestId = `pick${++pickSeq}`;
           const timer = setTimeout(() => {
             pendingPicks.delete(requestId);
-            resolve({ ok: false, error: 'The page did not answer. Is the app still open?' });
+            resolve({
+              ok: false,
+              error:
+                'The page did not answer. Is the app still open in a browser, or the device app in the foreground?',
+            });
           }, 20_000);
           timer.unref?.();
           pendingPicks.set(requestId, (result) => {
@@ -1583,7 +1690,10 @@ const pangular = defineDevframe({
         const requestId = `n${++ngrxSeq}`;
         const timer = setTimeout(() => {
           pendingNgrx.delete(requestId);
-          resolve({ error: 'No page answered within 10s. Is the app open in a browser?' });
+          resolve({
+            error:
+              'No page answered within 10s. Is the app open in a browser, or the device app in the foreground?',
+          });
         }, 10_000);
         timer.unref?.();
         pendingNgrx.set(requestId, (result) => {
@@ -2885,7 +2995,7 @@ const pangular = defineDevframe({
     agent.registerTool({
       id: 'pangular:list-pages',
       description:
-        'List the browser tabs and Angular Native apps that report live data to this server, newest first: page id, URL, title, platform (`browser` or `Angular Native`), seconds since the last report (marked `background` for a tab in the background, which stops reporting until shown again) and which inspectors report. The URL comes from the HTTP or router report, or from the component tree when those have none. Pass a page id as `page` to the live tools to pick a page; without it they use the most recent page.',
+        'List the browser tabs, Angular Native apps and Capacitor apps that report live data to this server, newest first: page id, URL, title, platform (`browser`, `Angular Native`, or `Capacitor (android)` / `Capacitor (ios)` for an app in a native WebView), seconds since the last report (marked `background` for a tab in the background, which stops reporting until shown again) and which inspectors report. The URL comes from the HTTP or router report, or from the component tree when those have none. Pass a page id as `page` to the live tools to pick a page; without it they use the most recent page.',
       safety: 'read',
       inputSchema: { type: 'object', properties: {} },
       handler: async () => {
@@ -2901,6 +3011,11 @@ const pangular = defineDevframe({
         const platforms = new Map<string, string>();
         for (const page of componentPages.values()) {
           if (page.platform) platforms.set(page.pageId, page.platform);
+        }
+        for (const page of capacitorPages.values()) {
+          if (page.info.bridge && !platforms.has(page.pageId)) {
+            platforms.set(page.pageId, `capacitor-${page.info.platform}`);
+          }
         }
         const withUrl = <T extends { pageId: string; reportedAt: number }>(pages: Iterable<T>) =>
           [...pages].map((page) => ({
@@ -2919,6 +3034,7 @@ const pangular = defineDevframe({
             router: withUrl(routerPages.values()),
             pipes: withUrl(pipePages.values()),
             http: withUrl(httpPages.values()),
+            capacitor: withUrl(capacitorPages.values()),
           },
           visibility.list(),
         );
@@ -2943,6 +3059,11 @@ export interface PangularHostOptions {
    * for the stdio MCP server, which no page can reach.
    */
   pageTools?: boolean;
+  /**
+   * Pairing tokens a client may send to be trusted without the one-time code.
+   * Server-only: they never go into the published config.
+   */
+  authTokens?: string[];
 }
 
 export function createPangular(options: PangularConfig = {}, host: PangularHostOptions = {}) {
@@ -2953,6 +3074,11 @@ export function createPangular(options: PangularConfig = {}, host: PangularHostO
     ...pangular,
     setup: (ctx, info) => {
       const withConfig: SetupInfo = { ...info, config, pageTools: host.pageTools };
+      if (host.authTokens?.length && !registerAuthTokens(ctx, host.authTokens)) {
+        console.warn(
+          '[pangular] The pairing tokens could not be registered, so clients need the one-time code.',
+        );
+      }
       return pangular.setup(ctx, withConfig);
     },
   });

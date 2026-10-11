@@ -99,7 +99,7 @@ With `ws: {sidecar: true}`, the WebSocket runs on its own port, picked automatic
 | ---------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `base`           | `'/__devframes/'`                         | Where the hub is mounted. The devtools panel lives at `<base>pangular/`.                                                                                                                                                            |
 | `ws`             |                                           | `false` uses server-sent events only. `{ sidecar: true }` runs the WebSocket on its own port.                                                                                                                                       |
-| `auth`           | on                                        | `false` turns off the one-time code.                                                                                                                                                                                                |
+| `auth`           | on                                        | `false` turns off the one-time code. `{tokens: [...]}` keeps it on and trusts clients that send one of the [pairing tokens](../security.md#pairing-tokens).                                                                         |
 | `allowedOrigins` | loopback origins and the Chrome extension | Extra origins allowed to open the WebSocket, such as a tunnel. `false` turns the origin check off.                                                                                                                                  |
 | `mcp`            | a bearer token                            | Mounts the MCP endpoint at `<base>__mcp` and asks for a bearer token. With `auth: false` the default is `'auto'`: it mounts once agent tools exist and asks for no token. See [Send a token](../agents/mcp-server.md#send-a-token). |
 
@@ -168,14 +168,14 @@ bootstrapApplication(App, appConfig)
 
 A floating button appears on your page. It opens the devtools with one dock entry per tool:
 
-| Dock entry     | Shows                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------- |
-| Angular        | Dashboard, components, routes, signals, injectors, forms, pipes, and SSR & HTTP                   |
-| NgRx           | Store patterns from source, and live state and actions                                            |
-| Analog         | File routes, server calls, render modes and lint (a notice in non-Analog apps)                    |
-| Angular Native | Components, signals, injectors and store of a connected [Angular Native](./angular-native.md) app |
-| NativeScript   | Setup steps for [NativeScript apps](../guides/nativescript.md)                                    |
-| Capacitor      | A **Coming Soon** placeholder                                                                     |
+| Dock entry     | Shows                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| Angular        | Dashboard, components, routes, signals, injectors, forms, pipes, and SSR & HTTP                                |
+| NgRx           | Store patterns from source, and live state and actions                                                         |
+| Analog         | File routes, server calls, render modes and lint (a notice in non-Analog apps)                                 |
+| Angular Native | Components, signals, injectors and store of a connected [Angular Native](./angular-native.md) app              |
+| NativeScript   | Setup steps for [NativeScript apps](../guides/nativescript.md)                                                 |
+| Capacitor      | Plugin calls of a connected [Capacitor app](../inspectors/capacitor.md), or setup steps when none is connected |
 
 [Popup and hub](./popup-and-hub.md) covers the panel, its dock modes and deep links.
 

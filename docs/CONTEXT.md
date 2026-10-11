@@ -9,7 +9,7 @@ One browser tab running the inspected app with the overlay loaded. Several pages
 _Avoid_: tab (a tab is a view in the panel), client, window
 
 **Platform**:
-What renders a page: a browser, or Angular Native on a device or simulator. The Angular Native overlay marks its component reports with `platform: 'angular-native'`; a report without one is a browser page. The Angular Native view and `list-pages` read it.
+What renders a page: a browser, Angular Native on a device or simulator, or a Capacitor app's native WebView. The Angular Native overlay marks its component reports with `platform: 'angular-native'`; a report without one is a browser page. The Angular Native view and `list-pages` read it. `list-pages` also labels a page whose Capacitor report has a native bridge `Capacitor (android)` or `Capacitor (ios)`, from that report's platform. A Capacitor page without a native bridge, such as the app in a desktop browser, shows as `browser`.
 _Avoid_: target, runtime, device type
 
 **pageId**:
@@ -17,12 +17,20 @@ The short id a page claims when the overlay starts, kept in `sessionStorage` so 
 _Avoid_: tab id, session id, client id
 
 **Overlay**:
-The script the app imports in `main.ts` in development only (`@pangular-inspector/devtools/overlay`). It finds the server, starts the collectors and adds the floating button. It reads the page; it never changes it on its own.
+The script the app imports in `main.ts` in development only (`@pangular-inspector/devtools/overlay`). It finds the server, starts the collectors and adds the floating button. `@pangular-inspector/devtools/overlay-manual` is the same script without the start on import or the button; the app calls `initOverlay()`, for example with `connectionMeta` in a Capacitor WebView. It reads the page; it never changes it on its own.
 _Avoid_: content script, agent, injected script
 
 **Collector**:
 One inspector's page-side code inside the overlay, such as `forms-collector.ts` or `pipes-collector.ts`. It reads the app through Angular's debug APIs, gives objects stable ids through a `WeakMap`, and pushes a report tagged with the `pageId`.
 _Avoid_: scraper, probe, watcher
+
+**Plugin call**:
+One call an app makes to a Capacitor plugin method, logged by the Capacitor collector with its arguments, outcome and duration. `native` when it went through the native bridge, `web` when a web implementation (or core's "not implemented" check) answered it in JavaScript.
+_Avoid_: bridge call, native call (for both kinds)
+
+**Capacitor hook**:
+The early part of the Capacitor collector (`capacitor-collector.ts`), loaded through `@pangular-inspector/devtools/capacitor-hook` before `@capacitor/core`. It wraps the native bridge and `registerPlugin` so plugin calls are logged from app start, and the overlay picks up its buffer when it connects.
+_Avoid_: interceptor, patch, monkey patch
 
 **Host tree**:
 The tree Angular rendered into, as the component, injector, signal graph and NgRx collectors walk it: roots, children, parent and a tag for each host (`HostTree` in `host-tree.ts`). In the browser it is the DOM, through `domTree()`; a platform without a DOM describes its own views.
@@ -33,7 +41,7 @@ A report a collector sends to the server over RPC, such as `push-component-tree`
 _Avoid_: sync, upload, post
 
 **Inspector**:
-One area the devtools can look at: `components`, `injectors`, `signals`, `ngrx`, `forms`, `router`, `pipes`, `http` and `analog` (`PANGULAR_INSPECTORS` in `config.ts`). An inspector owns a collector, its RPC functions, its agent tools and its view in the panel, and `inspectors` in the config turns all of them off together.
+One area the devtools can look at: `components`, `injectors`, `signals`, `ngrx`, `forms`, `router`, `pipes`, `http`, `analog` and `capacitor` (`PANGULAR_INSPECTORS` in `config.ts`). An inspector owns a collector, its RPC functions, its agent tools and its view in the panel, and `inspectors` in the config turns all of them off together.
 _Avoid_: plugin, module, feature
 
 **Devframe**:
@@ -45,7 +53,7 @@ The server part an app mounts: `initPangularHub()` for Express, or the Vite plug
 _Avoid_: server (too broad), middleware, proxy
 
 **Dock**:
-The rail of entries the hub shows (Angular, NgRx, Analog, Angular Native, and the Coming Soon placeholders), each opening a view of the panel (`hub-docks.ts`).
+The rail of entries the hub shows (Angular, NgRx, Analog, Angular Native, NativeScript and Capacitor), each opening a view of the panel (`hub-docks.ts`).
 _Avoid_: sidebar, menu, tab bar
 
 **Panel**:

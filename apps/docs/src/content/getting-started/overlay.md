@@ -118,9 +118,100 @@ The floating button follows the path the overlay connected to. If that path is `
 
 ### One overlay per page
 
-Only one overlay runs on a page. Importing the module already starts one on the default URLs. When you call `initOverlay`, it stops the running overlay first, the auto-started one included, and then starts yours. The page never ends up with two connections.
+Only one overlay runs on a page. Importing `@pangular-inspector/devtools/overlay` already starts one on the default URLs. When you call `initOverlay`, it stops the running overlay first, the auto-started one included, and then starts yours. The page never ends up with two connections.
 
 An overlay that was stopped or replaced before it connected does not report its connection error.
+
+### Start it yourself
+
+`@pangular-inspector/devtools/overlay-manual` exports the same functions as `@pangular-inspector/devtools/overlay`, but starts nothing on import. Nothing connects and no floating button appears until you call `initOverlay`, and `initOverlay` never adds the button:
+
+```ts
+// src/main.ts
+import {bootstrapApplication} from '@angular/platform-browser';
+import {App} from './app/app';
+import {appConfig} from './app/app.config';
+
+bootstrapApplication(App, appConfig).then(async () => {
+  if (typeof ngDevMode === 'undefined' || ngDevMode) {
+    const {initOverlay} = await import('@pangular-inspector/devtools/overlay-manual');
+    await initOverlay({baseURL: '/__my-devtools/'});
+  }
+});
+```
+
+Use it when the default URLs can never answer, so the first connection attempt only logs an error, or when the page has no room for the button. Import one of the two entries, not both.
+
+### Pass the connection info
+
+Before it connects, `initOverlay` fetches `__connection.json` from `baseURL` to learn the server's transport. The devtools servers send that file without CORS headers, so a page on another origin cannot read it. Pass its content as `connectionMeta` and the overlay skips the fetch:
+
+```ts
+// src/main.ts
+const {initOverlay} = await import('@pangular-inspector/devtools/overlay-manual');
+await initOverlay({
+  baseURL: 'http://192.168.1.20:4000/__devframes/pangular/',
+  connectionMeta: {backend: 'sse', sse: {path: '/__devframes/__sse'}},
+});
+```
+
+| Field       | What it is                                                                                     |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `backend`   | The transport: `'sse'` or `'websocket'`. Copy it from the server's `__connection.json`.        |
+| `sse`       | The SSE endpoint. A path that starts with `/` resolves against the origin of `baseURL`.        |
+| `websocket` | The WebSocket endpoint. A relative path, such as `'__ws'`, resolves against `baseURL`.         |
+| `configs`   | The server's devtools config. Without it, the overlay uses the [defaults](./configuration.md). |
+
+With `connectionMeta`, the overlay resolves paths against one `baseURL`, so pass a single URL. `initOverlay` rejects a list, or no `baseURL`, with an error that says so.
+
+Without `configs`, the page runs every inspector with the default limits and redaction, and the server's `redaction.secretNames` are not applied on the page. The overlay logs a warning once. To use the server's config, pass the whole `__connection.json` of the server as `connectionMeta`.
+
+The endpoints must still accept the page's origin. [Set up Capacitor](../guides/capacitor.md) uses this for an app in a mobile WebView.
+
+### Skip the one-time code
+
+If the server has [pairing tokens](../security.md#pairing-tokens), pass one as `authToken` and the page is trusted without the code:
+
+Commit a stub that holds no token, so every clone builds:
+
+```ts
+// src/devtools-token.ts (committed)
+export const devtoolsToken: string | undefined = undefined;
+```
+
+Keep the real token in a second file that git ignores, and swap it in with a build configuration of your own:
+
+```ts
+// src/devtools-token.local.ts (listed in .gitignore)
+export const devtoolsToken: string | undefined = 'the value of PANGULAR_AUTH_TOKEN on your machine';
+```
+
+```json
+// angular.json (excerpt, under projects.my-app.architect.build.configurations)
+{
+  "device": {
+    "fileReplacements": [
+      {"replace": "src/devtools-token.ts", "with": "src/devtools-token.local.ts"}
+    ]
+  }
+}
+```
+
+```ts
+// src/main.ts (excerpt, inside the ngDevMode check)
+const {devtoolsToken} = await import('./devtools-token');
+await initOverlay({
+  baseURL: 'http://192.168.1.20:9999/',
+  connectionMeta: {backend: 'websocket', websocket: {path: '__ws'}},
+  authToken: devtoolsToken,
+});
+```
+
+Build with `ng build --configuration development,device`. Without the `device` configuration, as in a clone that has no local file, the stub leaves `authToken` out and the page asks for the code.
+
+The token is a development secret. Keep the local file out of git. The page keeps the token in its `localStorage`, and sends it in the query string of its connection URL. When the connection fails, the browser console prints that whole URL, token included, so don't share console output or device logs from a failed connection. Rotate the token if you did. See [Pairing tokens](../security.md#pairing-tokens).
+
+When the server refuses the token, the overlay logs a warning in the console and asks for the code instead. With `connectionMeta`, it also logs a warning once when it can't reach the server.
 
 ## Stop the overlay
 
@@ -135,7 +226,7 @@ export async function stopDevtools() {
 }
 ```
 
-`disposeOverlay` stops whichever overlay is running, including the one that importing the module started. It closes the connection, clears its timers, listeners and observers, and removes the floating button.
+`disposeOverlay` stops whichever overlay is running, including the one that importing `@pangular-inspector/devtools/overlay` started. It closes the connection, clears its timers, listeners and observers, and removes the floating button.
 
 To send data again, call `initOverlay`. It does not add the floating button back.
 
