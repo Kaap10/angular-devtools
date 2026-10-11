@@ -1131,9 +1131,11 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       --good: var(--ok);
       --bad: var(--danger);
       --info: #60a5fa;
+      --info-text: #bfdbfe;
 
       @include m.light {
         --info: #1d4ed8;
+        --info-text: #1e40af;
       }
     }
     :host {
@@ -1344,7 +1346,7 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
     .count[data-tone='warn'],
     [role='tab'][aria-selected='true'] .count[data-tone='warn'] {
       background: color-mix(in srgb, var(--warn) 12%, transparent);
-      color: var(--warn);
+      color: var(--warn-text);
     }
 
     .panel {
@@ -1685,7 +1687,7 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
     .pill.live {
       border-color: var(--accent-line);
       background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-      color: var(--accent);
+      color: var(--accent-text);
     }
     .pill[data-kind='layout'] {
       border-color: #94a3b8;
@@ -1805,30 +1807,20 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       }
     }
     [data-tone='good'].pill {
-      border-color: color-mix(in srgb, var(--ok) 30%, transparent);
-      background: color-mix(in srgb, var(--ok) 12%, transparent);
-      color: var(--ok);
+      @include m.tint(ok);
     }
     [data-tone='warn'].pill,
     [data-tone='warn'].chip {
-      border-color: color-mix(in srgb, var(--warn) 30%, transparent);
-      background: color-mix(in srgb, var(--warn) 12%, transparent);
-      color: var(--warn);
+      @include m.tint(warn);
     }
     [data-tone='bad'].pill,
     [data-tone='bad'].chip {
-      border-color: color-mix(in srgb, var(--danger) 30%, transparent);
-      background: color-mix(in srgb, var(--danger) 12%, transparent);
-      color: var(--danger);
+      @include m.tint(danger);
     }
     [data-tone='info'].pill {
       border-color: color-mix(in srgb, var(--info) 30%, transparent);
       background: color-mix(in srgb, var(--info) 12%, transparent);
-      color: #bfdbfe;
-
-      @include m.light {
-        color: var(--info);
-      }
+      color: var(--info-text);
     }
 
     .status {
@@ -1838,19 +1830,13 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       font-variant-numeric: tabular-nums;
     }
     .status[data-status='good'] {
-      border-color: color-mix(in srgb, var(--ok) 30%, transparent);
-      background: color-mix(in srgb, var(--ok) 12%, transparent);
-      color: var(--ok);
+      @include m.tint(ok);
     }
     .status[data-status='warn'] {
-      border-color: color-mix(in srgb, var(--warn) 30%, transparent);
-      background: color-mix(in srgb, var(--warn) 12%, transparent);
-      color: var(--warn);
+      @include m.tint(warn);
     }
     .status[data-status='bad'] {
-      border-color: color-mix(in srgb, var(--danger) 30%, transparent);
-      background: color-mix(in srgb, var(--danger) 12%, transparent);
-      color: var(--danger);
+      @include m.tint(danger);
     }
     .method {
       min-width: 52px;
@@ -1870,7 +1856,7 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       @include m.light {
         border-color: color-mix(in srgb, #0369a1 30%, transparent);
         background: color-mix(in srgb, #0369a1 8%, transparent);
-        color: #0369a1;
+        color: #075985;
       }
     }
     .method[data-method='POST'] {
@@ -1879,7 +1865,7 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       color: #86efac;
 
       @include m.light {
-        color: var(--ok);
+        color: var(--ok-text);
       }
     }
     .method[data-method='PUT'],
@@ -1889,7 +1875,7 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       color: #fde68a;
 
       @include m.light {
-        color: var(--warn);
+        color: var(--warn-text);
       }
     }
     .method[data-method='DELETE'] {
@@ -1898,7 +1884,7 @@ function walk(routes: AnalogRoute[], depth = 0, out: { route: AnalogRoute; depth
       color: #fecaca;
 
       @include m.light {
-        color: var(--danger);
+        color: var(--danger-text);
       }
     }
     .request {
