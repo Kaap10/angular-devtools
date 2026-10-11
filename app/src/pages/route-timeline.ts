@@ -2,6 +2,7 @@ import { Component, computed, input, linkedSignal } from '@angular/core';
 import type { DevframeRpcClient } from 'devframe/client';
 import { actionAllowed, actionBlockedMessage, panelConfig } from '../devtools-config';
 import { LimitNote } from '../ui/limit-note';
+import { rpcCall } from '../rpc';
 import { time } from '../format';
 import {
   SHARED_STYLES,
@@ -54,9 +55,21 @@ const PHASE_COLORS: Record<string, string> = {
         Record each guard and resolver
       </label>
       <button type="button" class="small export" (click)="exportJson()">Export JSON</button>
+      <button
+        type="button"
+        class="small"
+        aria-label="Clear navigations"
+        [disabled]="!navigationAllowed()"
+        [attr.aria-describedby]="navigationAllowed() ? null : 'route-timeline-writes-off'"
+        (click)="clearNavigations()"
+      >
+        Clear
+      </button>
     </div>
+    <!-- Always in the page, so screen readers announce the first message too. -->
+    <p class="visually-hidden" role="status">{{ message() }}</p>
     @if (message()) {
-      <p class="message" role="status">{{ message() }}</p>
+      <p class="message" aria-hidden="true">{{ message() }}</p>
     }
     @if (!navigationAllowed()) {
       <p id="route-timeline-writes-off" class="message">{{ navigationOff }}</p>
@@ -604,11 +617,15 @@ export class RouteTimeline {
           (!needle ||
             nav.url.toLowerCase().includes(needle) ||
             !!nav.finalUrl?.toLowerCase().includes(needle)) &&
-          (!this.onlyProblems() ||
-            !['succeeded', 'pending'].includes(nav.outcome) ||
-            this.loopById().has(nav.id)),
+          (!this.onlyProblems() || this.isProblem(nav)),
       );
   });
+
+  /** Probes cancel on purpose, so they are not problems; the tab badge skips them too. */
+  private isProblem(nav: NavigationRecord) {
+    if (nav.probe) return false;
+    return !['succeeded', 'pending'].includes(nav.outcome) || this.loopById().has(nav.id);
+  }
 
   loopOf(nav: NavigationRecord): NavigationLoop | undefined {
     return this.loopById().get(nav.id);
@@ -751,6 +768,26 @@ export class RouteTimeline {
     } catch {
       if (pageId === this.pageId()) this.message.set('The clipboard is not available here.');
     }
+  }
+
+  /** Drops this page's navigations and loop warnings; focus stays on the Clear button. */
+  async clearNavigations() {
+    const client = this.rpc();
+    const pageId = this.pageId();
+    const clearing = 'Clearing navigations…';
+    // A new message first, so a second clear in a row is announced too.
+    this.message.set(clearing);
+    let text: string;
+    try {
+      if (!client) throw new Error('No connection');
+      await rpcCall(client, 'clear-router-navigations', pageId);
+      text = 'Navigations cleared.';
+    } catch {
+      text = 'Could not clear the navigations.';
+    }
+    // The answer is about the page the user may have left; keep it off the page now shown.
+    if (pageId === this.pageId()) this.message.set(text);
+    else if (this.message() === clearing) this.message.set('');
   }
 
   exportJson() {
