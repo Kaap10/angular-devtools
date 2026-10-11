@@ -1,6 +1,7 @@
 import {
   Component,
   DestroyRef,
+  ElementRef,
   Injector,
   afterNextRender,
   computed,
@@ -9,6 +10,7 @@ import {
   input,
   linkedSignal,
   signal,
+  viewChild,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import type { DevframeRpcClient } from 'devframe/client';
@@ -147,6 +149,7 @@ function isTree(value: unknown): value is InjectorNode[] {
             <path d="m20 20-3.5-3.5" />
           </svg>
           <input
+            #queryInput
             type="search"
             placeholder="Find a token, component or injector…"
             aria-label="Find a token, component or injector"
@@ -206,7 +209,7 @@ function isTree(value: unknown): value is InjectorNode[] {
       } @else if (query().trim() && !rows().length) {
         <div class="where muted" role="status">
           Nothing here matches “{{ query().trim() }}”.
-          <button type="button" class="link" (click)="query.set('')">Clear search</button>
+          <button type="button" class="link" (click)="clearQuery()">Clear search</button>
         </div>
       }
 
@@ -490,6 +493,7 @@ function isTree(value: unknown): value is InjectorNode[] {
             <path d="m20 20-3.5-3.5" />
           </svg>
           <input
+            #queryInput
             type="search"
             placeholder="Filter by token or file…"
             aria-label="Filter by token or file"
@@ -520,7 +524,7 @@ function isTree(value: unknown): value is InjectorNode[] {
         <div class="state">
           <p class="state-title">No providers match “{{ query() }}”</p>
           <p class="state-hint">Try part of a token name or a file path.</p>
-          <button type="button" (click)="query.set('')">Clear filter</button>
+          <button type="button" (click)="clearQuery()">Clear filter</button>
         </div>
       } @else {
         <div class="source-providers">
@@ -1411,6 +1415,7 @@ export class DiInspector {
   readonly loaded = signal(false);
   readonly view = signal<TreeView>('element');
   readonly query = signal('');
+  private readonly queryInput = viewChild<ElementRef<HTMLInputElement>>('queryInput');
   readonly onlyProviding = signal(false);
   readonly componentsOnly = signal(true);
   readonly collapsed = this.perPage<ReadonlySet<string>>(() => new Set());
@@ -1592,6 +1597,12 @@ export class DiInspector {
       this.stopTree?.();
       this.highlight(null);
     });
+  }
+
+  /** Clears the search from a no-match message and keeps focus on the search box. */
+  clearQuery() {
+    this.query.set('');
+    this.queryInput()?.nativeElement.focus();
   }
 
   label(node: InjectorNode) {
