@@ -72,6 +72,8 @@ import {
   type FormsState,
   type InspectFormsArgs,
   FORMS_PAGE_TTL_MS,
+  UNTRUSTED,
+  untrusted,
 } from './rpc/forms-tools.ts';
 import {
   explainCustomControlText,
@@ -1801,9 +1803,12 @@ const pangular = defineDevframe({
           };
         }
         return {
+          // The notice is part of the heading, so the cap counts it too.
           markdown: inspectComponentText(
             detail,
-            `Live detail of \`${detail.name}\` (\`<${detail.tag}>\`, instance \`${detail.id}\` on page \`${hit.pageId}\`), read from the running page.${others ? `\n\n${others}` : ''}`,
+            untrusted(
+              `Live detail of \`${detail.name}\` (\`<${detail.tag}>\`, instance \`${detail.id}\` on page \`${hit.pageId}\`), read from the running page.${others ? `\n\n${others}` : ''}`,
+            ),
           ),
         };
       },
@@ -1984,6 +1989,8 @@ const pangular = defineDevframe({
           };
         }
         const view = { node: args.node, history: args.history };
+        // Signal values come from the page, so the graph sits behind the notice, inside the cap.
+        const budget = SIGNAL_TOOL_MAX - UNTRUSTED.length - 2;
         if (!matches(graph)) {
           const known = (graph.environments ?? []).map((e) => `\`${e.name}\``).join(', ');
           const covers = graph.componentSelector ?? graph.injector?.name ?? 'another target';
@@ -1992,12 +1999,15 @@ const pangular = defineDevframe({
             : '';
           const head = `No signal graph for \`${args.selector}\`.${hint} The live graph covers \`${covers}\`:\n\n`;
           return {
-            markdown: (
-              head + signalGraphText(graph, view, Math.max(0, SIGNAL_TOOL_MAX - head.length))
-            ).slice(0, SIGNAL_TOOL_MAX),
+            markdown: untrusted(
+              (head + signalGraphText(graph, view, Math.max(0, budget - head.length))).slice(
+                0,
+                budget,
+              ),
+            ),
           };
         }
-        return { markdown: signalGraphText(graph, view) };
+        return { markdown: untrusted(signalGraphText(graph, view, budget)) };
       },
     });
 
@@ -2707,7 +2717,8 @@ const pangular = defineDevframe({
       lines.push(
         `Marker: ${latestMarker(state)}. Call form-diff with since set to the marker you had before this action to see what changed.`,
       );
-      return lines.join('\n');
+      // The page writes the message, errors and skipped reasons.
+      return untrusted(lines.join('\n'));
     };
 
     agent.registerTool({
