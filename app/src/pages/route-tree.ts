@@ -22,6 +22,11 @@ import {
   type SourceRoute,
 } from './router-types';
 
+/** "3 of 12 routes": the filtered count, worded like the other panel pages. */
+export function routeCountText(matches: number, total: number): string {
+  return `${matches} of ${total} ${total === 1 ? 'route' : 'routes'}`;
+}
+
 interface NodeRow {
   node: RouteNode;
   depth: number;
@@ -109,13 +114,19 @@ interface TestedUrl {
         aria-label="Filter routes"
         placeholder="Filter by path, component or file"
         [value]="filter()"
-        (input)="filter.set($any($event.target).value)"
-        (keydown.escape)="filter.set('')"
+        (input)="setFilter($any($event.target).value)"
+        (keydown.escape)="setFilter('')"
       />
       @if (page().config) {
         <p class="muted summary">
-          Generation {{ page().generation }} · {{ rows().length }} route(s). Lazy routes show their
-          children once loaded.
+          Generation {{ page().generation }} ·
+          @if (filter()) {
+            <span class="count">{{ countText() }}</span
+            >.
+          } @else {
+            {{ rows().length }} route(s).
+          }
+          Lazy routes show their children once loaded.
           @if (page().configTruncated; as left) {
             {{ left }} route(s) left out: the page lists at most 200 routes per level and 1000 in
             total.
@@ -123,6 +134,7 @@ interface TestedUrl {
         </p>
       }
     </div>
+    <p class="visually-hidden" role="status">{{ filterAnnouncement() }}</p>
     @if (!page().config) {
       <div class="empty">
         <p class="empty-title">
@@ -144,7 +156,7 @@ interface TestedUrl {
       <div class="empty">
         <p class="empty-title">No routes match the filter.</p>
         <p class="muted">Try a shorter path or a component name.</p>
-        <button type="button" class="small" (click)="filter.set(''); filterInput.focus()">
+        <button type="button" class="small" (click)="setFilter(''); filterInput.focus()">
           Clear filter
         </button>
       </div>
@@ -364,6 +376,10 @@ interface TestedUrl {
       font-size: 12px;
       font-variant-numeric: tabular-nums;
     }
+    .summary .count {
+      color: var(--text);
+      font-weight: 600;
+    }
     td {
       vertical-align: middle;
     }
@@ -454,7 +470,13 @@ export class RouteTree {
     source: this.pageId,
     computation: () => null,
   });
+  /** Spoken only from the filter input, so a poll that changes the routes stays quiet. */
+  readonly filterAnnouncement = linkedSignal<string, string>({
+    source: this.pageId,
+    computation: () => '',
+  });
   private predictSeq = 0;
+  private announceFlip = false;
   private probeSeq = 0;
   private readonly urlInput = viewChild<ElementRef<HTMLInputElement>>('urlInput');
 
@@ -482,6 +504,27 @@ export class RouteTree {
     visit(this.page().config ?? [], 0);
     return rows;
   });
+
+  readonly total = computed(() => {
+    const count = (nodes: RouteNode[]): number =>
+      nodes.reduce((sum, node) => sum + 1 + count(node.children ?? []), 0);
+    return count(this.page().config ?? []);
+  });
+
+  readonly countText = computed(() => routeCountText(this.rows().length, this.total()));
+
+  setFilter(value: string) {
+    this.filter.set(value);
+    const matches = this.rows().length;
+    const text = !value
+      ? ''
+      : matches
+        ? `${routeCountText(matches, this.total())} match.`
+        : 'No routes match.';
+    // A new query with the same count still changes the text, so screen readers say it again.
+    this.announceFlip = !this.announceFlip;
+    this.filterAnnouncement.set(text && (this.announceFlip ? `${text}\u00a0` : text));
+  }
 
   hasKeys(value: Record<string, unknown>) {
     return Object.keys(value).length > 0;
