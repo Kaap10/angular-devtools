@@ -1,10 +1,16 @@
-import { Component, computed, input, signal } from '@angular/core';
+import { Component, computed, input, output, signal } from '@angular/core';
 import type { CdReport } from '@pangular-inspector/devtools/config';
 import type { DevframeRpcClient } from 'devframe/client';
 import { panelConfig } from '../devtools-config';
 import { time } from '../format';
 import { rpcCall as call } from '../rpc';
 import { LimitNote } from '../ui/limit-note';
+import { aggregateComponents, cyclesInRange, type CdRange } from './cd-chart-data';
+import { CdCycleChart } from './cd-cycle-chart';
+import { CdFlameGraph } from './cd-flame-graph';
+import { CdTiming } from './cd-timing';
+import { CdTransfer, type CdImported } from './cd-transfer';
+import { CdTreemap } from './cd-treemap';
 
 export type { CdCheck, CdComponentStat, CdCycle } from '@pangular-inspector/devtools/config';
 /** One page's recording, as the page reports it. */
@@ -16,21 +22,35 @@ const SHOWN_CYCLES = 30;
 /** Record and Stop for change detection, with the slowest components and the latest cycles. */
 @Component({
   selector: 'app-cd-recording',
-  imports: [LimitNote],
+  imports: [LimitNote, CdTiming, CdTransfer, CdCycleChart, CdFlameGraph, CdTreemap],
   template: `
     <section class="cd" aria-labelledby="cd-heading">
       <div class="cd-head">
         <h2 id="cd-heading">Change detection</h2>
-        <button type="button" [class.on]="recording()" [disabled]="!pageId()" (click)="toggle()">
-          <span class="dot" aria-hidden="true"></span>
-          {{ recording() ? 'Stop recording' : 'Record' }}
-        </button>
-        @if (cycles().length) {
-          <button type="button" (click)="clear()">Clear</button>
+        @if (!imported()) {
+          <button type="button" [class.on]="recording()" [disabled]="!pageId()" (click)="toggle()">
+            <span class="dot" aria-hidden="true"></span>
+            {{ recording() ? 'Stop recording' : 'Record' }}
+          </button>
+          @if (cycles().length) {
+            <button type="button" (click)="clear()">Clear</button>
+          }
         }
+        <app-cd-transfer
+          [page]="page()"
+          [maxCycles]="maxCycles()"
+          (imported)="showImport($event)"
+        />
         <p class="status">{{ status() }}</p>
         <p class="sr-only" role="status">{{ announcement() }}</p>
       </div>
+      @if (imported(); as file) {
+        <p class="imported">
+          <span class="badge">Imported recording</span>
+          <span class="mono">{{ file.fileName }}</span>
+          <button type="button" (click)="closeImport()">Back to live recording</button>
+        </p>
+      }
       <p class="hint">
         Records each change detection cycle with Angular's profiler: how long it took, how many
         components it checked and the output that ran before it. Tree rows show how often each
@@ -48,10 +68,38 @@ const SHOWN_CYCLES = 30;
       @for (note of capNotes(); track note) {
         <p class="note">{{ note }}</p>
       }
-      @if (slowest().length) {
+      @if (cycles().length) {
+        <h3>Cycles</h3>
+        <app-cd-cycle-chart [cycles]="cycles()" [(range)]="range" />
+        <app-cd-flame-graph
+          [cycles]="picked()"
+          [names]="spanNames()"
+          [scope]="scope()"
+          (pick)="showComponent.emit($event)"
+        />
+        @if (!hasSpans()) {
+          <p class="spans-note">
+            {{
+              range()
+                ? 'The picked cycles have no timed spans, so there is no flame graph for them.'
+                : 'This recording has no timed spans, so there is no flame graph. A recording from an older version, or a file saved without spans, has none.'
+            }}
+          </p>
+        }
+        <h3>Self time by component</h3>
+        @if (range()) {
+          <p class="note">
+            For picked cycles, totals come from the 10 slowest components each cycle lists.
+          </p>
+        }
+        <app-cd-treemap [stats]="stats()" [scope]="scope()" (pick)="showComponent.emit($event)" />
+      }
+      @if (page()?.components?.length) {
         <div class="cd-grid">
           <div>
-            <h3>Slowest components</h3>
+            <h3>
+              {{ range() ? 'Slowest components in the picked cycles' : 'Slowest components' }}
+            </h3>
             <table>
               <thead>
                 <tr>
@@ -68,6 +116,10 @@ const SHOWN_CYCLES = 30;
                     <td class="num">{{ c.checks }}</td>
                     <td class="num">{{ ms(c.ms) }}</td>
                     <td class="num">{{ ms(c.maxMs) }}</td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="4">No component time in the picked cycles.</td>
                   </tr>
                 }
               </tbody>
@@ -90,6 +142,12 @@ const SHOWN_CYCLES = 30;
                       >after <span class="mono">{{ cycle.trigger }}</span></span
                     >
                   }
+                  @if (cycle.hookMs) {
+                    <span class="timing">hooks {{ ms(cycle.hookMs) }}</span>
+                  }
+                  @if (cycle.afterRenderMs) {
+                    <span class="timing">afterRender {{ ms(cycle.afterRenderMs) }}</span>
+                  }
                   @if (cycle.components[0]; as top) {
                     <span class="top">
                       slowest <span class="mono">{{ top.name }}</span> {{ ms(top.ms) }}
@@ -100,6 +158,7 @@ const SHOWN_CYCLES = 30;
             </ol>
           </div>
         </div>
+        <app-cd-timing [page]="page()" />
       } @else if (recording()) {
         <p class="empty">Use the app. Cycles show up here as Angular runs change detection.</p>
       }
@@ -172,6 +231,7 @@ const SHOWN_CYCLES = 30;
     }
     .hint,
     .note,
+    .spans-note,
     .empty {
       margin: 8px 0;
       color: var(--text-2);
@@ -228,8 +288,25 @@ const SHOWN_CYCLES = 30;
     }
     .when,
     .trigger,
+    .timing,
     .top {
       color: var(--text-2);
+    }
+    .imported {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      margin: 8px 0;
+      color: var(--text-2);
+    }
+    .badge {
+      @include m.tint(accent);
+      padding: 2px 8px;
+      border: 1px solid;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
     }
     .trigger .mono,
     .top .mono {
@@ -238,9 +315,19 @@ const SHOWN_CYCLES = 30;
   `,
 })
 export class CdRecording {
-  readonly page = input<CdPage | null>(null);
+  /** The page's own recording. */
+  readonly livePage = input<CdPage | null>(null, { alias: 'page' });
   readonly pageId = input<string | null>(null);
   readonly rpc = input<DevframeRpcClient | null>(null);
+  /** A component class picked in the treemap, to show in the component tree. */
+  readonly showComponent = output<string>();
+  /** The cycles picked in the chart by id, or null for all of them. */
+  readonly range = signal<CdRange | null>(null);
+
+  /** A recording loaded from a file; while set, the section shows it instead of the page's. */
+  protected readonly imported = signal<CdImported | null>(null);
+  /** The recording on screen: an imported one, else the page's. */
+  readonly page = computed(() => this.imported()?.page ?? this.livePage());
 
   protected readonly message = signal('');
   /**
@@ -252,9 +339,27 @@ export class CdRecording {
   readonly recording = computed(() => this.page()?.recording === true);
   readonly cycles = computed(() => this.page()?.cycles ?? []);
   readonly maxCycles = computed(() => panelConfig(this.rpc()).limits.cdCycles);
-  readonly slowest = computed(() =>
-    [...(this.page()?.components ?? [])].sort((a, b) => b.ms - a.ms).slice(0, SHOWN),
+  /** The cycles the picked range covers, or every cycle. */
+  readonly picked = computed(() => cyclesInRange(this.cycles(), this.range()));
+  /** Whether any picked cycle has timed spans for the flame graph. */
+  readonly hasSpans = computed(() => this.picked().some((cycle) => cycle.spans?.length));
+  /** The names the cycles' spans point to. */
+  readonly spanNames = computed(() => this.page()?.spanNames ?? []);
+
+  /** Component totals for the picked cycles, or the recording's own totals for all of them. */
+  readonly stats = computed(() =>
+    this.range()
+      ? aggregateComponents(this.picked())
+      : [...(this.page()?.components ?? [])].sort((a, b) => b.ms - a.ms),
   );
+  readonly scope = computed(() => {
+    const picked = this.range() ? this.picked() : [];
+    if (!picked.length) return 'the recording';
+    return picked.length === 1
+      ? `cycle ${picked[0].id}`
+      : `cycles ${picked[0].id} to ${picked.at(-1)!.id}`;
+  });
+  readonly slowest = computed(() => this.stats().slice(0, SHOWN));
   readonly latest = computed(() => this.cycles().slice(-SHOWN_CYCLES).reverse());
   /** Says when the recording checked more classes or instances than it keeps. */
   readonly capNotes = computed(() => {
@@ -276,6 +381,7 @@ export class CdRecording {
   readonly status = computed(() => {
     if (this.message()) return this.message();
     const count = this.cycles().length;
+    if (this.imported()) return `${count} ${count === 1 ? 'cycle' : 'cycles'} imported.`;
     if (this.recording()) return `Recording. ${count} ${count === 1 ? 'cycle' : 'cycles'} so far.`;
     return count ? `${count} ${count === 1 ? 'cycle' : 'cycles'} recorded.` : '';
   });
@@ -299,7 +405,24 @@ export class CdRecording {
     }
   }
 
+  showImport(file: CdImported) {
+    this.message.set('');
+    this.range.set(null);
+    this.imported.set(file);
+    const count = file.page.cycles.length;
+    this.announce(
+      `Imported ${file.fileName}: ${count} ${count === 1 ? 'cycle' : 'cycles'}. Showing the imported recording.`,
+    );
+  }
+
+  closeImport() {
+    this.imported.set(null);
+    this.range.set(null);
+    this.announce('Showing the live recording.');
+  }
+
   async clear() {
+    this.range.set(null);
     await this.send({ clear: true }, '', () => 'Cleared the recorded cycles.');
   }
 
