@@ -441,10 +441,10 @@ export const ROUTER_WRITE_ACTIONS: readonly string[] = ['navigate', 'abort', 're
 /** Agent tools that perform an action's writes; blocking the action drops them. */
 export const ACTION_TOOLS: Record<PangularAction, readonly string[]> = {
   forms: ['form-action', 'fill-form'],
-  router: [],
+  router: ['clear-recordings'],
   ngrx: ['dispatch-ngrx-action'],
-  http: ['set-http-rule', 'remove-http-rule'],
-  analog: ['analog-call-api'],
+  http: ['set-http-rule', 'remove-http-rule', 'clear-recordings'],
+  analog: ['analog-call-api', 'clear-recordings'],
 };
 
 export function actionBlockedMessage(action: PangularAction): string {
@@ -453,7 +453,7 @@ export function actionBlockedMessage(action: PangularAction): string {
     router: 'Navigating and clearing navigations',
     ngrx: 'Restoring NgRx state and dispatching actions',
     http: 'Changing HTTP mock rules and clearing HTTP calls',
-    analog: 'Calling API routes',
+    analog: 'Calling API routes and clearing server calls',
   }[action];
   return `${what} is turned off in the devtools config (actions.${action}).`;
 }
@@ -585,6 +585,7 @@ export const AGENT_INSPECTOR: Record<string, PangularInspector> = {
   'list-http-rules': 'http',
   'set-http-rule': 'http',
   'remove-http-rule': 'http',
+  'clear-recordings': 'http',
   'list-capacitor-calls': 'capacitor',
   'list-capacitor-plugins': 'capacitor',
 };
@@ -595,6 +596,7 @@ export const AGENT_INSPECTOR: Record<string, PangularInspector> = {
  */
 export const PAGE_AGENT_ENTRIES: readonly string[] = [
   'list-pages',
+  'clear-recordings',
   'component-tree',
   'highlight',
   'inspect-component',
@@ -673,8 +675,16 @@ export function agentAllowed(
 ): boolean {
   if (config.agent.readOnly && entry.safety === 'action') return false;
   const name = agentName(entry.id);
-  if (PANGULAR_ACTIONS.some((key) => !config.actions[key] && ACTION_TOOLS[key].includes(name))) {
+  const matchingActions = PANGULAR_ACTIONS.filter((key) => ACTION_TOOLS[key].includes(name));
+  if (matchingActions.length > 0 && matchingActions.every((key) => !config.actions[key])) {
     return false;
+  }
+  if (name === 'clear-recordings') {
+    return Boolean(
+      (config.agent.tools.http && config.inspectors.http && config.actions.http) ||
+      (config.agent.tools.router && config.inspectors.router && config.actions.router) ||
+      (config.agent.tools.analog && config.inspectors.analog && config.actions.analog),
+    );
   }
   const inspector = agentInspector(entry.id);
   return !inspector || config.agent.tools[inspector];

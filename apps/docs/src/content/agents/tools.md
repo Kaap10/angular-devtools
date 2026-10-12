@@ -4,7 +4,7 @@ description: Every agent tool the devtools expose, grouped by inspector, with wh
 ---
 
 <ngmd-hero title="Tools" logo="https://cdn.simpleicons.org/modelcontextprotocol/71717A" gradient>
-  Sixty-one tools, grouped by inspector. Each one answers a question you would otherwise answer by clicking through the panel.
+  Sixty-two tools, grouped by inspector. Each one answers a question you would otherwise answer by clicking through the panel.
 </ngmd-hero>
 
 # Tools
@@ -48,12 +48,12 @@ The URL comes from the HTTP or router report. A page that sends neither (no rout
 ### Action tools
 
 <ngmd-alert severity="important">
-  <code>highlight</code>, <code>navigate</code>, <code>dispatch-ngrx-action</code>, <code>form-action</code>, <code>fill-form</code>, <code>set-http-rule</code>, <code>remove-http-rule</code> and <code>analog-call-api</code> act on the app. Every other tool is marked read-only for your client.
+  <code>highlight</code>, <code>navigate</code>, <code>dispatch-ngrx-action</code>, <code>form-action</code>, <code>fill-form</code>, <code>set-http-rule</code>, <code>remove-http-rule</code>, <code>analog-call-api</code> and <code>clear-recordings</code> act on the app. Every other tool is marked read-only for your client.
 </ngmd-alert>
 
 ### Turn tools off
 
-The server decides which tools exist. Set `agent.readOnly` to drop the eight action tools. Set `agent.tools.<inspector>` to `false` to hide one inspector's tools and resources, and keep its tab. Turning an inspector off with `inspectors`, or blocking an action with `actions`, drops the matching tools too. `actions.router` is the exception: `navigate` stays and refuses `navigate`, `abort`, `replay` and `probe`. See [Inspectors and agent tools](../getting-started/configuration.md#inspectors-and-agent-tools).
+The server decides which tools exist. Set `agent.readOnly` to drop the nine action tools. Set `agent.tools.<inspector>` to `false` to hide one inspector's tools and resources, and keep its tab. Turning an inspector off with `inspectors`, or blocking an action with `actions`, drops the matching tools too. `actions.router` is the exception: `navigate` stays and refuses `navigate`, `abort`, `replay` and `probe`. See [Inspectors and agent tools](../getting-started/configuration.md#inspectors-and-agent-tools).
 
 ## Source scan
 
@@ -409,6 +409,18 @@ These tools read and change the rules of [Fault injection](../inspectors/ssr-htt
 `set-http-rule` checks its input the way the panel's form does. `pattern` is a substring or a glob where `*` matches anything, up to 500 characters. A leading `^` anchors it at the start of the URL path. `target` is `client`, `server` or `both` (the default). `status` is one of the statuses the panel lists. `delayMs` runs from 0 to 10000. `body` is JSON text or a JSON value, up to 100,000 characters. A rule needs a `status`, a `delayMs` or a `body`, and there can be at most 50 rules. A rule that breaks one of these is refused with the reason, and nothing changes. A rule that applies to SSR takes effect on the next page load. Patterns and bodies in the answers are masked like recorded calls.
 
 With [`actions.http`](../getting-started/configuration.md#actions) set to `false`, `set-http-rule` and `remove-http-rule` are dropped, and `list-http-rules` says that no rule applies.
+
+### Clear recordings <ngmd-badge variant="alpha">Action</ngmd-badge>
+
+Resets recorded data between reproduction runs: recorded HTTP calls, router navigations, and Analog server calls. Reads: page.
+
+| Tool               | What it does                                                                                                   | Arguments                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `clear-recordings` | Clears recorded HTTP calls, router navigations, or Analog server calls, and broadcasts the reset to the panel. | `target` (required), `page` |
+
+`target` is one of `http`, `router`, `analog`, or `all`. With `router`, `page` clears navigations for that browser tab only; when left out, it clears navigations for every reporting page.
+
+`clear-recordings` needs the matching write action ([`actions.http`](../getting-started/configuration.md#actions), `actions.router`, `actions.analog`). When `target` is `all` and an action is disabled, the permitted recordings are cleared and the disabled ones are reported as skipped.
 
 ## Capacitor
 

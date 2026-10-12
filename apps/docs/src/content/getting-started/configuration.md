@@ -122,11 +122,11 @@ interface PangularConfig {
 
 ### Inspectors and agent tools
 
-| Option               | Default | What it does                                                                                                                                                                                               |
-| -------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inspectors.<name>`  | `true`  | `false` removes the inspector: no tab or dock, no page collector, no RPC functions, and no agent tools or resources. Its actions are blocked too.                                                          |
-| `agent.readOnly`     | `false` | `true` drops every agent tool that acts on the page or the server: `highlight`, `form-action`, `fill-form`, `navigate`, `dispatch-ngrx-action`, `set-http-rule`, `remove-http-rule` and `analog-call-api`. |
-| `agent.tools.<name>` | `true`  | `false` hides one inspector's agent tools and resources. The tab stays.                                                                                                                                    |
+| Option               | Default | What it does                                                                                                                                                                                                                   |
+| -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `inspectors.<name>`  | `true`  | `false` removes the inspector: no tab or dock, no page collector, no RPC functions, and no agent tools or resources. Its actions are blocked too.                                                                              |
+| `agent.readOnly`     | `false` | `true` drops every agent tool that acts on the page or the server: `highlight`, `form-action`, `fill-form`, `navigate`, `dispatch-ngrx-action`, `set-http-rule`, `remove-http-rule`, `analog-call-api` and `clear-recordings`. |
+| `agent.tools.<name>` | `true`  | `false` hides one inspector's agent tools and resources. The tab stays.                                                                                                                                                        |
 
 `agent.tools` has the same keys as `inspectors`. An inspector that is off has no agent tools, whatever `agent.tools` says.
 
@@ -136,14 +136,14 @@ If you open a tab that is turned off, the panel says so, shows the option that t
 
 Actions are the writes that the panel and agents make to your app or the server.
 
-| Option           | Default | What `false` blocks                                                                                                                                                                                            |
-| ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `actions.forms`  | `true`  | Form writes: set value, fill, mark touched, untouched, dirty or pristine, touch all, revalidate, reset, enable, disable, submit and restore. Drops `form-action` and `fill-form`.                              |
-| `actions.router` | `true`  | Navigate, abort, replay and probe, and clearing the navigations list. Probe runs your app's `canMatch` guards. The `navigate` agent tool stays for `instrument` and `resolve-lazy` and refuses the other four. |
-| `actions.ngrx`   | `true`  | Restoring NgRx state from the change log and dispatching `@ngrx/store` actions. Drops the `dispatch-ngrx-action` agent tool.                                                                                   |
-| `actions.http`   | `true`  | Editing fault injection rules and SSR overrides, and clearing the HTTP timeline. Drops the `set-http-rule` and `remove-http-rule` agent tools.                                                                 |
-| `actions.analog` | `true`  | The Analog request playground. Drops the `analog-call-api` agent tool.                                                                                                                                         |
-| `actions`        | `true`  | All of the above.                                                                                                                                                                                              |
+| Option           | Default | What `false` blocks                                                                                                                                                                                                |
+| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `actions.forms`  | `true`  | Form writes: set value, fill, mark touched, untouched, dirty or pristine, touch all, revalidate, reset, enable, disable, submit and restore. Drops `form-action` and `fill-form`.                                  |
+| `actions.router` | `true`  | Navigate, abort, replay and probe, and clearing the navigations list. Drops router clearing in `clear-recordings`. The `navigate` agent tool stays for `instrument` and `resolve-lazy` and refuses the other four. |
+| `actions.ngrx`   | `true`  | Restoring NgRx state from the change log and dispatching `@ngrx/store` actions. Drops the `dispatch-ngrx-action` agent tool.                                                                                       |
+| `actions.http`   | `true`  | Editing fault injection rules and SSR overrides, and clearing the HTTP timeline. Drops the `set-http-rule` and `remove-http-rule` agent tools and HTTP clearing in `clear-recordings`.                             |
+| `actions.analog` | `true`  | The Analog request playground and clearing server calls. Drops the `analog-call-api` agent tool and Analog clearing in `clear-recordings`.                                                                         |
+| `actions`        | `true`  | All of the above.                                                                                                                                                                                                  |
 
 Pass `actions: false` to block every action, or an object to block some. Keys you leave out of the object stay on.
 

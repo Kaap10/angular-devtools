@@ -176,6 +176,7 @@ import {
 import type { HttpPage, HttpPayloadState, HttpReport, HttpState } from './types.ts';
 
 import { analogPages, nameServerFns, registerAnalog } from './rpc/analog-register.ts';
+import { clearCalls } from './analog-server-log.ts';
 import { createPageVisibility } from './rpc/page-ttl.ts';
 import {
   PAGE_ARGUMENT,
@@ -904,23 +905,25 @@ const pangular = defineDevframe({
       },
     });
 
+    const clearHttpCalls = () => {
+      if (!config.actions.http) throw new Error(actionBlockedMessage('http'));
+      pendingServerCalls = [];
+      pendingDropped = 0;
+      for (const [id, page] of httpPages) httpPages.set(id, { ...page, calls: [], dropped: 0 });
+      httpState.mutate((draft) => {
+        draft.serverCalls = [];
+        draft.serverDropped = 0;
+        draft.requests = [];
+        draft.pages = [...httpPages.values()].sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+      });
+      void my.rpc.broadcast({ method: 'http-clear', args: [], optional: true });
+    };
+
     register({
       name: 'clear-http-calls',
       type: 'action',
       jsonSerializable: true,
-      handler: () => {
-        if (!config.actions.http) throw new Error(actionBlockedMessage('http'));
-        pendingServerCalls = [];
-        pendingDropped = 0;
-        for (const [id, page] of httpPages) httpPages.set(id, { ...page, calls: [], dropped: 0 });
-        httpState.mutate((draft) => {
-          draft.serverCalls = [];
-          draft.serverDropped = 0;
-          draft.requests = [];
-          draft.pages = [...httpPages.values()].sort((a, b) => a.firstSeenAt - b.firstSeenAt);
-        });
-        void my.rpc.broadcast({ method: 'http-clear', args: [], optional: true });
-      },
+      handler: clearHttpCalls,
     });
 
     const forgetSignalPages = (ids: string[]) => {
@@ -1155,6 +1158,127 @@ const pangular = defineDevframe({
       },
       handler: async (args: { id?: unknown }) =>
         httpRuleChange(removeHttpRule(registry.rules ?? [], args.id), 'Removed'),
+    });
+
+    agent.registerTool({
+      id: 'pangular:clear-recordings',
+      description:
+        'Clears recorded HTTP calls, router navigations, or Analog server calls between reproduction runs (development only). Specify `target` as "http", "router", "analog", or "all". An optional `page` clears only the navigations of that specific page.',
+      safety: 'action',
+      inputSchema: {
+        type: 'object',
+        required: ['target'],
+        properties: {
+          target: {
+            type: 'string',
+            enum: ['http', 'router', 'analog', 'all'],
+            description: 'Which recordings to clear: `http`, `router`, `analog`, or `all`.',
+          },
+          page: PAGE_ARGUMENT,
+        },
+      },
+      handler: async (args: { target?: unknown; page?: string }) => {
+        const target = typeof args?.target === 'string' ? args.target : undefined;
+        if (!target || !['http', 'router', 'analog', 'all'].includes(target)) {
+          throw new Error('Provide a valid target: "http", "router", "analog", or "all".');
+        }
+
+        const pageId = pageArgument(args as Record<string, unknown> | undefined);
+        if (pageId && (target === 'router' || target === 'all') && !routerPages.has(pageId)) {
+          return {
+            markdown: unknownPageText(pageId, byRecency(routerPages.values()), 'a router report'),
+          };
+        }
+
+        const cleared: string[] = [];
+        const skipped: string[] = [];
+
+        const httpEligible =
+          config.actions.http && config.agent.tools.http && config.inspectors.http;
+        if (target === 'http' || target === 'all') {
+          if (!httpEligible) {
+            const reason = !config.actions.http
+              ? 'actions.http is turned off'
+              : !config.agent.tools.http
+                ? 'agent.tools.http is turned off'
+                : 'inspectors.http is turned off';
+            if (target === 'http') {
+              if (!config.actions.http) throw new Error(actionBlockedMessage('http'));
+              throw new Error(`HTTP recording is disabled in the devtools config (${reason}).`);
+            }
+            skipped.push(`HTTP calls (${reason})`);
+          } else {
+            clearHttpCalls();
+            cleared.push('recorded HTTP calls');
+          }
+        }
+
+        const routerEligible =
+          config.actions.router && config.agent.tools.router && config.inspectors.router;
+        if (target === 'router' || target === 'all') {
+          if (!routerEligible) {
+            const reason = !config.actions.router
+              ? 'actions.router is turned off'
+              : !config.agent.tools.router
+                ? 'agent.tools.router is turned off'
+                : 'inspectors.router is turned off';
+            if (target === 'router') {
+              if (!config.actions.router) throw new Error(actionBlockedMessage('router'));
+              throw new Error(`Router recording is disabled in the devtools config (${reason}).`);
+            }
+            skipped.push(`router navigations (${reason})`);
+          } else {
+            if (pageId) {
+              if (clearRouterNavigations(routerPages, pageId)) {
+                applyRouter(currentRouter(routerPages));
+              }
+              void my.rpc.broadcast({ method: 'router-clear', args: [{ pageId }], optional: true });
+              cleared.push(`router navigations for page "${pageId}"`);
+            } else {
+              for (const id of routerPages.keys()) {
+                clearRouterNavigations(routerPages, id);
+                void my.rpc.broadcast({
+                  method: 'router-clear',
+                  args: [{ pageId: id }],
+                  optional: true,
+                });
+              }
+              applyRouter(currentRouter(routerPages));
+              cleared.push('router navigations');
+            }
+          }
+        }
+
+        const analogEligible =
+          config.actions.analog && config.agent.tools.analog && config.inspectors.analog;
+        if (target === 'analog' || target === 'all') {
+          if (!analogEligible) {
+            const reason = !config.actions.analog
+              ? 'actions.analog is turned off'
+              : !config.agent.tools.analog
+                ? 'agent.tools.analog is turned off'
+                : 'inspectors.analog is turned off';
+            if (target === 'analog') {
+              if (!config.actions.analog) throw new Error(actionBlockedMessage('analog'));
+              throw new Error(`Analog recording is disabled in the devtools config (${reason}).`);
+            }
+            skipped.push(`Analog calls (${reason})`);
+          } else {
+            clearCalls();
+            cleared.push('Analog server calls');
+          }
+        }
+
+        if (cleared.length === 0) {
+          return { markdown: `No recordings were cleared. Skipped: ${skipped.join(', ')}.` };
+        }
+
+        let message = `Cleared ${cleared.join(', ')}.`;
+        if (skipped.length > 0) {
+          message += ` Skipped: ${skipped.join(', ')}.`;
+        }
+        return { markdown: message };
+      },
     });
 
     register({

@@ -228,6 +228,7 @@ describe('agent tool and RPC registration', () => {
     expect(actionTools.sort()).toEqual(
       [
         'analog-call-api',
+        'clear-recordings',
         'dispatch-ngrx-action',
         'fill-form',
         'form-action',
@@ -251,6 +252,7 @@ describe('agent tool and RPC registration', () => {
     expect(forms.actionTools.sort()).toEqual(
       [
         'analog-call-api',
+        'clear-recordings',
         'dispatch-ngrx-action',
         'highlight',
         'navigate',
