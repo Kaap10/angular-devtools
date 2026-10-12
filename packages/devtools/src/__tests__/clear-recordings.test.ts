@@ -259,4 +259,52 @@ describe('clear-recordings agent tool', () => {
     });
     expect(tools).not.toContain('clear-recordings');
   });
+
+  it('drops clear-recordings when no target has both actions and agent tools enabled', async () => {
+    const { tools } = await boot({
+      actions: { http: true, router: false, analog: false },
+      agent: { tools: { http: false, router: true, analog: true } },
+    });
+    expect(tools).not.toContain('clear-recordings');
+  });
+
+  it('blocks target when agent.tools is false even if action is true', async () => {
+    const { call } = await boot({
+      actions: { http: true, router: true },
+      agent: { tools: { http: false, router: true } },
+    });
+    await expect(call('clear-recordings', { target: 'http' })).rejects.toThrow(
+      'HTTP recording is disabled in the devtools config (agent.tools.http is turned off).',
+    );
+  });
+
+  it('returns unknown page text when requested router page is absent', async () => {
+    const { call } = await boot();
+    const result = await call('clear-recordings', { target: 'router', page: 'missing-page-id' });
+    expect(result).toContain('No page `missing-page-id` is reporting a router report.');
+  });
+
+  it('validates router page upfront and preserves other recordings when target is all and page is unknown', async () => {
+    const { push, call } = await boot();
+    await push(
+      'push-http',
+      httpReport('page-1', [
+        {
+          id: 'call-keep',
+          url: '/api/preserve',
+          method: 'GET',
+          status: 200,
+          durationMs: 10,
+          side: 'client',
+        },
+      ]),
+    );
+
+    const result = await call('clear-recordings', { target: 'all', page: 'non-existent-page' });
+    expect(result).toContain('No page `non-existent-page` is reporting a router report.');
+
+    // HTTP calls must not have been cleared
+    const httpList = await call('list-http-calls');
+    expect(httpList).toContain('/api/preserve');
+  });
 });

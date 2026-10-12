@@ -680,10 +680,10 @@ export function agentAllowed(
     return false;
   }
   if (name === 'clear-recordings') {
-    return (
-      (config.agent.tools.http && config.inspectors.http) ||
-      (config.agent.tools.router && config.inspectors.router) ||
-      (config.agent.tools.analog && config.inspectors.analog)
+    return Boolean(
+      (config.agent.tools.http && config.inspectors.http && config.actions.http) ||
+      (config.agent.tools.router && config.inspectors.router && config.actions.router) ||
+      (config.agent.tools.analog && config.inspectors.analog && config.actions.analog),
     );
   }
   const inspector = agentInspector(entry.id);

@@ -1183,25 +1183,51 @@ const pangular = defineDevframe({
           throw new Error('Provide a valid target: "http", "router", "analog", or "all".');
         }
 
+        const pageId = pageArgument(args as Record<string, unknown> | undefined);
+        if (pageId && (target === 'router' || target === 'all') && !routerPages.has(pageId)) {
+          return {
+            markdown: unknownPageText(pageId, byRecency(routerPages.values()), 'a router report'),
+          };
+        }
+
         const cleared: string[] = [];
         const skipped: string[] = [];
 
+        const httpEligible =
+          config.actions.http && config.agent.tools.http && config.inspectors.http;
         if (target === 'http' || target === 'all') {
-          if (!config.actions.http) {
-            if (target === 'http') throw new Error(actionBlockedMessage('http'));
-            skipped.push('HTTP calls (actions.http is turned off)');
+          if (!httpEligible) {
+            const reason = !config.actions.http
+              ? 'actions.http is turned off'
+              : !config.agent.tools.http
+                ? 'agent.tools.http is turned off'
+                : 'inspectors.http is turned off';
+            if (target === 'http') {
+              if (!config.actions.http) throw new Error(actionBlockedMessage('http'));
+              throw new Error(`HTTP recording is disabled in the devtools config (${reason}).`);
+            }
+            skipped.push(`HTTP calls (${reason})`);
           } else {
             clearHttpCalls();
             cleared.push('recorded HTTP calls');
           }
         }
 
+        const routerEligible =
+          config.actions.router && config.agent.tools.router && config.inspectors.router;
         if (target === 'router' || target === 'all') {
-          if (!config.actions.router) {
-            if (target === 'router') throw new Error(actionBlockedMessage('router'));
-            skipped.push('router navigations (actions.router is turned off)');
+          if (!routerEligible) {
+            const reason = !config.actions.router
+              ? 'actions.router is turned off'
+              : !config.agent.tools.router
+                ? 'agent.tools.router is turned off'
+                : 'inspectors.router is turned off';
+            if (target === 'router') {
+              if (!config.actions.router) throw new Error(actionBlockedMessage('router'));
+              throw new Error(`Router recording is disabled in the devtools config (${reason}).`);
+            }
+            skipped.push(`router navigations (${reason})`);
           } else {
-            const pageId = pageArgument(args as Record<string, unknown> | undefined);
             if (pageId) {
               if (clearRouterNavigations(routerPages, pageId)) {
                 applyRouter(currentRouter(routerPages));
@@ -1223,10 +1249,20 @@ const pangular = defineDevframe({
           }
         }
 
+        const analogEligible =
+          config.actions.analog && config.agent.tools.analog && config.inspectors.analog;
         if (target === 'analog' || target === 'all') {
-          if (!config.actions.analog) {
-            if (target === 'analog') throw new Error(actionBlockedMessage('analog'));
-            skipped.push('Analog calls (actions.analog is turned off)');
+          if (!analogEligible) {
+            const reason = !config.actions.analog
+              ? 'actions.analog is turned off'
+              : !config.agent.tools.analog
+                ? 'agent.tools.analog is turned off'
+                : 'inspectors.analog is turned off';
+            if (target === 'analog') {
+              if (!config.actions.analog) throw new Error(actionBlockedMessage('analog'));
+              throw new Error(`Analog recording is disabled in the devtools config (${reason}).`);
+            }
+            skipped.push(`Analog calls (${reason})`);
           } else {
             clearCalls();
             cleared.push('Analog server calls');
