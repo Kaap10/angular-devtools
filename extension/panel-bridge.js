@@ -18,7 +18,10 @@ const REFUSED_DOCS = {
 const PATHS = ['/__pangular/', '/__devframes/pangular/', '/__devframe/', '/'];
 const CONNECTION_FILES = ['__devframe/__connection.json', '__connection.json'];
 const PROBE_TIMEOUT_MS = 1500;
-const PINNED_ORIGIN = 'chrome-extension://dcogniffeelebaolkkfbopmjcblhblfk';
+// The first path gets this long on its own before the rest are sent.
+const PROBE_HEAD_START_MS = 150;
+// Keep in step with PANGULAR_EXTENSION_IDS in packages/devtools/src/extension-origin.ts.
+const PINNED_ORIGINS = ['chrome-extension://dcogniffeelebaolkkfbopmjcblhblfk'];
 const REFUSED_TEXT_LIMIT = 200;
 const PAGE_ID_WAIT_MS = 5000;
 const PAGE_ID_POLL_MS = 250;
@@ -101,7 +104,7 @@ async function detectConnection() {
       const reason = refused.text ? ` It said: "${refused.text}"` : '';
       const extension = chrome.runtime.getURL('').replace(/\/$/, '');
       const hint =
-        refused.status === 403 && extension !== PINNED_ORIGIN
+        refused.status === 403 && !PINNED_ORIGINS.includes(extension)
           ? ` If the page runs on this machine, add ${extension} to allowedOrigins to trust this extension. That does not change the rule that the server only answers this machine.`
           : '';
       showStatus(
@@ -129,33 +132,56 @@ async function waitForPageId(run) {
   }
 }
 
-// The first candidate that answers with a connection file, and the status of each probe.
+// The first candidate, in PATHS order, that answers with a connection file, and the
+// status of each probe. The first candidate gets a short head start; then the rest run at
+// once, so a missing server costs one timeout. Probes still running once a winner is
+// known are aborted.
 async function findConnection(candidates) {
-  const probes = [];
-  for (const candidate of candidates) {
-    const probe = { url: candidate.url, status: null, text: '' };
-    probes.push(probe);
-    try {
-      const response = await fetch(candidate.url, {
-        credentials: 'omit',
-        cache: 'no-store',
-        redirect: 'error',
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      });
-      probe.status = response.status;
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          probe.text = (await response.text()).trim().slice(0, REFUSED_TEXT_LIMIT);
-        }
-        continue;
-      }
-      await response.json();
-      return { found: candidate, probes };
-    } catch {
-      // Not mounted here; try the next one.
-    }
+  const probes = candidates.map((candidate) => ({ url: candidate.url, status: null, text: '' }));
+  const losers = new AbortController();
+  const answers = [probe(candidates[0], probes[0], losers.signal)];
+  const headStart = await Promise.race([
+    answers[0],
+    new Promise((resolve) => setTimeout(() => resolve(null), PROBE_HEAD_START_MS)),
+  ]);
+  if (headStart) return { found: candidates[0], probes: probes.slice(0, 1) };
+  for (let index = 1; index < candidates.length; index++) {
+    answers.push(probe(candidates[index], probes[index], losers.signal));
   }
-  return { found: null, probes };
+  try {
+    for (const [index, answer] of answers.entries()) {
+      if (await answer) {
+        return { found: candidates[index], probes: probes.slice(0, index + 1) };
+      }
+    }
+    return { found: null, probes };
+  } finally {
+    losers.abort();
+  }
+}
+
+// Whether `candidate` answers with a connection file; records its status in `result`.
+async function probe(candidate, result, cancel) {
+  try {
+    const response = await fetch(candidate.url, {
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.any([cancel, AbortSignal.timeout(PROBE_TIMEOUT_MS)]),
+    });
+    result.status = response.status;
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        result.text = (await response.text()).trim().slice(0, REFUSED_TEXT_LIMIT);
+      }
+      return false;
+    }
+    await response.json();
+    return true;
+  } catch {
+    // Not mounted here.
+    return false;
+  }
 }
 
 function showStatus(
@@ -215,11 +241,6 @@ window.addEventListener('message', async (event) => {
   if (reply) frame.contentWindow?.postMessage(reply, location.origin);
 });
 
-// Start detection after a short delay to let the page settle
-setTimeout(detectConnection, 500);
+detectConnection();
 
-chrome.devtools.network.onNavigated.addListener(() => {
-  detection++;
-  showStatus(DETECTING, { help: false });
-  setTimeout(detectConnection, 1000);
-});
+chrome.devtools.network.onNavigated.addListener(() => detectConnection());

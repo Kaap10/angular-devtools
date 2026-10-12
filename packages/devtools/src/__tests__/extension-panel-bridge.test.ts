@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PANGULAR_EXTENSION_ORIGINS } from '../extension-origin.ts';
 
 const root = join(import.meta.dirname, '../../../../extension');
 const source = [
@@ -20,7 +21,7 @@ interface Setup {
   extensionId?: string;
   granted?: boolean;
   grant?: boolean;
-  fetch?: (url: string) => Promise<Response>;
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   inspect?: (expression: string) => unknown;
 }
 
@@ -34,7 +35,7 @@ function open(setup: Setup = {}) {
   const origin = setup.origin ?? 'http://localhost:4200';
   let granted = setup.granted ?? true;
   const navigated: Listener[] = [];
-  const fetch = vi.fn((url: string) => (setup.fetch ?? offline)(url));
+  const fetch = vi.fn((url: string, init?: RequestInit) => (setup.fetch ?? offline)(url, init));
   const request = vi.fn(async () => {
     granted = setup.grant ?? false;
     return granted;
@@ -73,6 +74,7 @@ function open(setup: Setup = {}) {
     document,
     location,
     fetch,
+    AbortController,
     AbortSignal,
     URL,
     setTimeout,
@@ -226,7 +228,8 @@ describe('extension panel bridge', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(new URL(panel.frame.src).searchParams.get('pageId')).toBe('next-page');
     await vi.advanceTimersByTimeAsync(5000);
-    expect(panel.fetch).toHaveBeenCalledTimes(2);
+    const first = 'http://localhost:4200/__pangular/__devframe/__connection.json';
+    expect(panel.fetch.mock.calls.filter(([url]) => url === first)).toHaveLength(2);
   });
 
   it('falls back to the stored page id of an overlay that sets no global', async () => {
@@ -322,32 +325,96 @@ describe('extension panel bridge', () => {
   });
 
   it('drops a detection that finishes after a navigation and detects again', async () => {
-    let answer: (response: Response) => void = () => {};
+    const answers: ((response: Response) => void)[] = [];
     let slow = true;
     const panel = open({
       pageId: () => 'page-1',
       fetch: (url) =>
-        slow
-          ? new Promise((resolve) => (answer = resolve))
-          : found('/__pangular/__devframe/__connection.json')(url),
+        slow ? new Promise((resolve) => answers.push(resolve)) : new Promise(() => {}),
     });
-    await vi.advanceTimersByTimeAsync(500);
-    expect(panel.fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers.length).toBeGreaterThan(0);
 
     panel.navigate();
     expect(panel.message()).toBe('Detecting Angular app…');
     slow = false;
-    answer(new Response('{}', { status: 200 }));
+    answers.forEach((answer) => answer(new Response('{}', { status: 200 })));
     await vi.advanceTimersByTimeAsync(0);
     expect(panel.frame.style.display).toBe('none');
     expect(panel.message()).toBe('Detecting Angular app…');
+  });
 
-    await vi.advanceTimersByTimeAsync(1000);
+  it('detects again on navigation without a fixed delay', async () => {
+    let up = false;
+    const panel = open({
+      pageId: () => 'page-1',
+      fetch: (url) => (up ? found('/__pangular/__devframe/__connection.json')(url) : offline()),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(panel.message()).toMatch(/^No devtools server answered/);
+
+    up = true;
+    panel.navigate();
+    await vi.advanceTimersByTimeAsync(0);
     expect(panel.frame.style.display).toBe('block');
     expect(new URL(panel.frame.src).searchParams.get('baseURL')).toBe(
       'http://localhost:4200/__pangular/',
     );
   });
+
+  it('gives the first path a head start, then prefers the earliest path that answers', async () => {
+    const answers = new Map<string, (response: Response) => void>();
+    const signals = new Map<string, AbortSignal>();
+    const panel = open({
+      pageId: () => 'page-1',
+      fetch: (url, init) => {
+        signals.set(url, init!.signal!);
+        return new Promise((resolve) => answers.set(url, resolve));
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(panel.fetch.mock.calls.map(([url]) => url)).toEqual([
+      'http://localhost:4200/__pangular/__devframe/__connection.json',
+    ]);
+
+    await vi.advanceTimersByTimeAsync(150);
+    const urls = panel.fetch.mock.calls.map(([url]) => url);
+    expect(urls.length).toBeGreaterThan(2);
+    expect([...answers.keys()]).toEqual(urls);
+
+    answers.get('http://localhost:4200/__connection.json')!(new Response('{}', { status: 200 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(panel.frame.style.display).toBe('none');
+
+    const winner = 'http://localhost:4200/__devframes/pangular/__connection.json';
+    answers.get(winner)!(new Response('{}', { status: 200 }));
+    for (const url of urls.slice(0, urls.indexOf(winner))) {
+      answers.get(url)!(new Response('', { status: 404 }));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(new URL(panel.frame.src).searchParams.get('baseURL')).toBe(
+      'http://localhost:4200/__devframes/pangular/',
+    );
+    for (const url of urls.slice(urls.indexOf(winner) + 1)) {
+      expect(signals.get(url)!.aborted, url).toBe(true);
+    }
+  });
+
+  it('sends one probe when the first path answers within its head start', async () => {
+    const panel = open({
+      pageId: () => 'page-1',
+      fetch: found('/__pangular/__devframe/__connection.json'),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(panel.fetch).toHaveBeenCalledTimes(1);
+    expect(panel.frame.style.display).toBe('block');
+  });
+
+  it('pins the same extension origins the server trusts', () => {
+    const pinned = source.match(/const PINNED_ORIGINS = (\[[^\]]*\]);/)?.[1];
+    expect(JSON.parse(pinned!.replaceAll("'", '"'))).toEqual(PANGULAR_EXTENSION_ORIGINS);
+  });
+
   it('reveals a component the UI frame asks for and answers with the request id', async () => {
     const inspect = vi.fn((expression: string) =>
       expression.includes('__pangularHostOf') ? true : null,
