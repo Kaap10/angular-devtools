@@ -114,12 +114,19 @@ The header value is the origin of your dev server. Every example below sets it.
 
 If the hub asks for the one-time code, the HTTP endpoint also asks for a bearer token. Requests without the right token get `401`.
 
-| Setup                                        | Token required                                                                                        |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| [Express hub](../getting-started/express.md) | Yes, unless you pass `auth: false` or your own `mcp` option.                                          |
-| [Vite plugin](../getting-started/vite.md)    | Only when the one-time code is on. See the plugin's [`auth` option](../getting-started/vite.md#auth). |
+| Setup                                        | Token required                                                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [Express hub](../getting-started/express.md) | Yes, unless you pass `auth: false` or your own `mcp` option.                                           |
+| [Vite plugin](../getting-started/vite.md)    | Yes, unless you pass `auth: false`. See the plugin's [`auth` option](../getting-started/vite.md#auth). |
 
-The hub prints a generated token in the terminal when it starts. The token changes when the server process restarts, but not when `ng serve` rebuilds `server.ts`. To keep the same token across restarts, set `PANGULAR_MCP_TOKEN` in the environment of the server. The hub then uses that value and prints nothing.
+The hub writes a generated token to `~/.pangular-inspector/mcp-token` when it first starts, with mode `0600` so only your user can read it. It prints the path of that file, never the token. Later starts read the same file, so the token stays the same across restarts and across projects. Read it from your client, for example with `cat ~/.pangular-inspector/mcp-token`.
+
+| Variable                  | Effect                                                            |
+| ------------------------- | ----------------------------------------------------------------- |
+| `PANGULAR_MCP_TOKEN`      | The token to use. The hub then writes no file and prints nothing. |
+| `PANGULAR_MCP_TOKEN_FILE` | Another file to keep the token in.                                |
+
+To get a new token, delete the file and restart the server.
 
 Send the token in an `Authorization: Bearer <token>` header, next to the `Origin` header. If your setup needs no token, leave the `Authorization` header out.
 
@@ -182,7 +189,7 @@ The stdio server never needs a token.
 }
 ```
 
-The Claude Code and Cursor examples read the token from `PANGULAR_MCP_TOKEN`, so set the same value for the server and the client. VS Code asks for the token the first time it starts the server.
+The Claude Code and Cursor examples read the token from `PANGULAR_MCP_TOKEN`. Set it for the client from the token file, for example `export PANGULAR_MCP_TOKEN="$(cat ~/.pangular-inspector/mcp-token)"`, or set the same value for the server and the client. VS Code asks for the token the first time it starts the server.
 
 ### Open the app in a browser
 
@@ -208,21 +215,22 @@ The server registers tools with a colon, as `pangular:get-routes`. MCP clients s
 
 ### Read and action tools
 
-The server marks read-only tools as read-only for your client. Nine tools act on the app, so the server does not mark them:
+Each tool has a safety tier: `read`, `action` or `destructive`. The server marks `read` tools as read-only for your client, and `destructive` tools as destructive. Ten tools act on the app, so the server does not mark them read-only:
 
-| Tool                   | Reference                                                          |
-| ---------------------- | ------------------------------------------------------------------ |
-| `highlight`            | [Components, signals and DI](./tools.md#components-signals-and-di) |
-| `navigate`             | [Act on the router](./tools.md#act-on-the-router)                  |
-| `dispatch-ngrx-action` | [Dispatch an action](./tools.md#dispatch-an-action)                |
-| `form-action`          | [Act on a form](./tools.md#act-on-a-form)                          |
-| `fill-form`            | [Act on a form](./tools.md#act-on-a-form)                          |
-| `set-http-rule`        | [Fault rules](./tools.md#fault-rules)                              |
-| `remove-http-rule`     | [Fault rules](./tools.md#fault-rules)                              |
-| `analog-call-api`      | [Call a server route](./tools.md#call-a-server-route)              |
-| `clear-recordings`     | [Clear recordings](./tools.md#clear-recordings)                    |
+| Tool                   | Tier          | Reference                                             |
+| ---------------------- | ------------- | ----------------------------------------------------- |
+| `navigate`             | `action`      | [Act on the router](./tools.md#act-on-the-router)     |
+| `dispatch-ngrx-action` | `action`      | [Dispatch an action](./tools.md#dispatch-an-action)   |
+| `form-action`          | `action`      | [Act on a form](./tools.md#act-on-a-form)             |
+| `fill-form`            | `action`      | [Act on a form](./tools.md#act-on-a-form)             |
+| `set-http-rule`        | `action`      | [Fault rules](./tools.md#fault-rules)                 |
+| `remove-http-rule`     | `action`      | [Fault rules](./tools.md#fault-rules)                 |
+| `record-pipes`         | `action`      | [Record pipe calls](./tools.md#record-pipe-calls)     |
+| `change-detection`     | `action`      | [change-detection](./tools.md#change-detection)       |
+| `clear-recordings`     | `destructive` | [Clear recordings](./tools.md#clear-recordings)       |
+| `analog-call-api`      | `destructive` | [Call a server route](./tools.md#call-a-server-route) |
 
-Your client can ask you before it runs them. To drop them from the server, set `agent.readOnly`. See [Inspectors and agent tools](../getting-started/configuration.md#inspectors-and-agent-tools).
+Your client can ask you before it runs them. To drop them from the server, set `agent.readOnly`, which keeps only the `read` tools. `change-detection` stays without its `record` argument, as a `read` tool. See [Inspectors and agent tools](../getting-started/configuration.md#inspectors-and-agent-tools).
 
 ### Pages and tabs
 

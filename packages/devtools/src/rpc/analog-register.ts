@@ -9,6 +9,8 @@ import {
   refetchedServerFns,
   type AnalogCall,
 } from '../analog-server-log.ts';
+import { existsSync, readdirSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { redactAnalogReport } from '../analog-redact.ts';
 import type { PayloadSummary } from '../http-payload.ts';
 import {
@@ -38,6 +40,7 @@ import {
   type AnalogState,
   UNTRUSTED,
 } from './analog-tools.ts';
+import type { PageOwners } from './page-owners.ts';
 import { fixedTtl, PAGE_TTL_MS, type PageTtl } from './page-ttl.ts';
 
 type AnyRecord = Record<string, any>;
@@ -85,7 +88,92 @@ export interface ApiRequest {
   confirm?: boolean;
 }
 
-export async function callApi(request: ApiRequest, origin = devOrigin()): Promise<AnyRecord> {
+/** Query flags that make Vite serve a module or file instead of the app's response. */
+const VITE_QUERY_FLAGS = new Set([
+  'raw',
+  'url',
+  'import',
+  'inline',
+  'worker',
+  'sharedworker',
+  'html-proxy',
+  'direct',
+]);
+
+function matchesApiPattern(pattern: string, path: string): boolean {
+  const want = pattern.split('/').filter(Boolean);
+  const got = path.split('/').filter(Boolean);
+  for (let i = 0; i < want.length; i++) {
+    if (want[i] === '**') return got.length > i;
+    if (got[i] === undefined) return false;
+    if (!want[i].startsWith(':') && want[i] !== got[i]) return false;
+  }
+  return got.length === want.length;
+}
+
+/** Whether the path names a file or folder in the project, which Vite would serve as source. */
+function namesProjectFile(root: string, path: string): boolean {
+  if (path === '/') return false;
+  const full = join(root, path);
+  if (existsSync(full)) return true;
+  try {
+    const name = basename(full);
+    return readdirSync(dirname(full)).some((entry) => entry.startsWith(`${name}.`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why `analog-call-api` refuses a path, or `undefined` when the path is an API route, an
+ * `/_analog` URL or a page of the app. Vite internals (`/@fs/`, `/@id/`), `?raw` and other
+ * Vite query flags, and paths that name a project file are refused, so the tool can't read
+ * source or files outside the app.
+ */
+export function apiPathRefusal(
+  path: string,
+  project: Pick<AnalogProject, 'root' | 'routes' | 'api' | 'config'>,
+): string | undefined {
+  const base = 'http://dev.invalid';
+  let url: URL;
+  let pathname: string;
+  try {
+    url = new URL(path, base);
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return 'The path is not a valid URL path.';
+  }
+  const rawPath = path.split(/[?#]/)[0];
+  if (url.origin !== base || /[\\\0]/.test(rawPath) || /[\\\0]/.test(pathname)) {
+    return 'Pass a path on the dev server, for example /api/v1/hello.';
+  }
+  const segments = [...rawPath.split('/'), ...pathname.split('/')];
+  if (segments.some((segment) => /^(\.|%2e){1,2}$/i.test(segment))) {
+    return 'The path may not contain . or .. segments.';
+  }
+  const first = pathname.split('/')[1] ?? '';
+  if (first.startsWith('@') || first.startsWith('__') || first === 'node_modules') {
+    return `${pathname} is a dev server internal, not an API route or page.`;
+  }
+  const flag = [...url.searchParams.keys()].find((key) => VITE_QUERY_FLAGS.has(key));
+  if (flag) return `The ?${flag} query makes Vite serve a file, so it is not allowed.`;
+  if (namesProjectFile(project.root, pathname)) {
+    return `${pathname} names a file in the project, not an API route or page.`;
+  }
+  const prefix = project.config.apiPrefix.replace(/^\/+|\/+$/g, '');
+  const under = (dir: string) => pathname === `/${dir}` || pathname.startsWith(`/${dir}/`);
+  if (prefix && under(prefix)) return undefined;
+  if (under('_analog')) return undefined;
+  if (project.api.some((route) => matchesApiPattern(route.path, pathname))) return undefined;
+  if (explainUrl(project.routes, pathname).matched) return undefined;
+  return `${pathname} is not an API route, an /_analog URL or a page of this app.`;
+}
+
+export async function callApi(
+  request: ApiRequest,
+  origin = devOrigin(),
+  refuse: (path: string) => string | undefined = () => undefined,
+): Promise<AnyRecord> {
   const method = (request.method ?? 'GET').toUpperCase();
   if (!/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(method)) {
     return { ok: false, error: `Unsupported method ${method}.` };
@@ -98,6 +186,8 @@ export async function callApi(request: ApiRequest, origin = devOrigin()): Promis
   ) {
     return { ok: false, error: 'Pass a path that starts with /, for example /api/v1/hello.' };
   }
+  const refusal = refuse(request.path);
+  if (refusal) return { ok: false, error: refusal };
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && request.confirm !== true) {
     return { ok: false, error: `${method} can change data; call again with confirm: true.` };
   }
@@ -143,13 +233,15 @@ export function stopAnalog(owner?: unknown) {
 export async function registerAnalog(
   my: Scoped,
   ctx: AgentHost,
-  options: { blockCalls?: string; owner?: unknown; ttl?: PageTtl } = {},
+  options: { blockCalls?: string; owner?: unknown; ttl?: PageTtl; owners?: PageOwners } = {},
 ) {
   disposeAnalog?.();
   const ttl = options.ttl ?? fixedTtl(PAGE_TTL_MS);
   analogOwner = options.owner;
   const sendApi = (request: ApiRequest): Promise<AnyRecord> =>
-    options.blockCalls ? Promise.resolve({ error: options.blockCalls }) : callApi(request);
+    options.blockCalls
+      ? Promise.resolve({ error: options.blockCalls })
+      : callApi(request, devOrigin(), (path) => apiPathRefusal(path, project()));
   const state = await my.rpc.sharedState('analog', {
     initialValue: {
       pages: [],
@@ -218,6 +310,7 @@ export async function registerAnalog(
     jsonSerializable: true,
     handler: (report: unknown) => {
       if (!isAnalogReport(report)) return;
+      if (options.owners && !options.owners.write(report.pageId)) return;
       seenAt.set(report.pageId, Date.now());
       apply(
         mergeAnalogReport(current(), resolveAnalogReport(project(), redactAnalogReport(report))),
@@ -229,7 +322,9 @@ export async function registerAnalog(
     type: 'action',
     jsonSerializable: true,
     handler: (pageId: unknown) => {
-      if (typeof pageId === 'string') dropPages([pageId]);
+      if (typeof pageId !== 'string') return;
+      if (options.owners && !options.owners.forget(pageId)) return;
+      dropPages([pageId]);
     },
   });
   my.rpc.register({
@@ -293,7 +388,6 @@ export async function registerAnalog(
     id: 'pangular:analog-routes',
     description:
       'List the Analog file-based routes in match order: URL pattern, page or layout file, route groups, [param] and catch-all segments, sibling .server.ts (load/action), routeMeta keys and titles. Pass `filter` to narrow by path or file.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: { filter: { type: 'string' } } },
     handler: async (args: { filter?: string }) => text(analogRoutesText(project(), args?.filter)),
   });
@@ -301,7 +395,6 @@ export async function registerAnalog(
     id: 'pangular:analog-explain-url',
     description:
       'Explain which Analog files render a URL (layout chain, page, .server.ts load and its endpoint), the params, or why nothing matches with the closest candidates.',
-    safety: 'read',
     inputSchema: { type: 'object', required: ['url'], properties: { url: { type: 'string' } } },
     handler: async (args: { url?: string }) =>
       text(
@@ -314,7 +407,6 @@ export async function registerAnalog(
     id: 'pangular:analog-current-page',
     description:
       'The Analog page open in the browser: its files (layouts first), load() data it received, server rendering and hydration state, hydration errors, and page files the running router does not know yet (restart needed).',
-    safety: 'read',
     inputSchema: { type: 'object', properties: { page } },
     handler: async (args: { page?: string }) =>
       text(analogCurrentPageText(project(), current(), args?.page)),
@@ -323,7 +415,6 @@ export async function registerAnalog(
     id: 'pangular:analog-server-calls',
     description:
       'Recent server calls seen by the dev server: page renders (with render mode), load() fetches (GET /_analog/pages), form action submissions (other methods on /_analog/pages, with success, redirect or validation error outcome), server functions by name (including reads that ran during server rendering, seen through their TransferState seed) and API routes, with status, time, size, who called (ssr or browser) and a redacted response preview. Flags load() fetched twice and seeded server function reads called again in the browser.',
-    safety: 'read',
     inputSchema: {
       type: 'object',
       properties: {
@@ -339,7 +430,6 @@ export async function registerAnalog(
     id: 'pangular:analog-server-functions',
     description:
       'List Analog server functions (serverFn exports in src/**/*.server.ts) with name, HTTP method, file and the id Analog routes them under (/_analog/fn/<id>), how often each was called over HTTP and during server rendering, and reads called again in the browser right after hydration. Empty when no .server.ts file exports serverFn.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogServerFnsText(project(), current())),
   });
@@ -347,7 +437,6 @@ export async function registerAnalog(
     id: 'pangular:analog-api-routes',
     description:
       'List Analog/Nitro server routes under src/server/routes with method, URL and file, plus server middleware.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogApiRoutesText(project())),
   });
@@ -355,7 +444,6 @@ export async function registerAnalog(
     id: 'pangular:analog-call-api',
     description:
       'Send a request to a route on the running dev server (for example GET /api/v1/hello) and return status, time and body. Methods other than GET, HEAD and OPTIONS need confirm: true.',
-    safety: 'action',
     inputSchema: {
       type: 'object',
       required: ['path'],
@@ -391,7 +479,6 @@ export async function registerAnalog(
     id: 'pangular:analog-render-modes',
     description:
       'For each Analog page: how it is rendered (server rendered per request, prerendered, cached, redirected or client only) with the routeRules entry, prerender.routes or build output that decides it, and what the last request to that page (including dynamic and catch-all URLs) actually did.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogRenderModesText(project(), current())),
   });
@@ -399,7 +486,6 @@ export async function registerAnalog(
     id: 'pangular:analog-prerender-plan',
     description:
       'Compare prerender.routes with the page files and the build output: static pages left out, dynamic pages that need explicit entries, and listed routes missing from dist.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogPrerenderText(project())),
   });
@@ -407,7 +493,6 @@ export async function registerAnalog(
     id: 'pangular:analog-content',
     description:
       'List markdown content files with slug, frontmatter, the route that serves them and parse errors. Pass `filter` to narrow.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: { filter: { type: 'string' } } },
     handler: async (args: { filter?: string }) => text(analogContentText(project(), args?.filter)),
   });
@@ -415,7 +500,6 @@ export async function registerAnalog(
     id: 'pangular:analog-lint',
     description:
       'Analog checks: two files for one URL, sibling [param] files, missing default export, layout without router-outlet, .server.ts without load, action or server functions, or without a page, redirect mistakes, bad API method suffix, duplicate API routes, routes outside the API prefix, prerender entries that match nothing, frontmatter errors, duplicate slugs, plus live problems (load fetched twice, seeded server function read called again, hydration errors, restart needed, API 404/405). Hydration errors and restart hints come from one page: `page`, or the most recent one.',
-    safety: 'read',
     inputSchema: { type: 'object', properties: { page } },
     handler: async (args: { page?: string }) =>
       text(analogLintText(project(), current(), args?.page)),

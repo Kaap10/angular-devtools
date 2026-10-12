@@ -1,8 +1,12 @@
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hubDefaultOrigins, initPangularHub, type PangularHubOptions } from '../hub.ts';
 import { httpRegistry } from '../http-rules.ts';
+import { writeTokenOnce } from '../mcp-token.ts';
 import { BASE_FILES, makeProject } from './analog-fixture.ts';
 
 const hubs: { close: () => Promise<void> }[] = [];
@@ -289,14 +293,47 @@ describe('Pangular Inspector hub MCP route', () => {
     expect(await allowed.text()).toContain('pangular_get-routes');
   });
 
-  it('prints a generated token when none is configured', async () => {
+  it('writes a generated token to a file only the user can read, and prints the path only', async () => {
     vi.stubEnv('PANGULAR_MCP_TOKEN', '');
+    const file = join(mkdtempSync(join(tmpdir(), 'pangular-token-')), 'nested', 'mcp-token');
+    vi.stubEnv('PANGULAR_MCP_TOKEN_FILE', file);
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const mcp = await bootMcp({ auth: true });
-    const token = /MCP token: (\S+)/.exec(log.mock.calls.flat().join('\n'))?.[1];
+    const token = readFileSync(file, 'utf8').trim();
     expect(token).toMatch(/^[\w-]{32}$/);
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
+    const printed = log.mock.calls.flat().join('\n');
+    expect(printed).toContain(file);
+    expect(printed).not.toContain(token);
     expect((await mcp()).status).toBe(401);
     expect((await mcp(token)).status).toBe(200);
+  });
+
+  it('reuses the token in the file across restarts and tightens its mode', async () => {
+    vi.stubEnv('PANGULAR_MCP_TOKEN', '');
+    const file = join(mkdtempSync(join(tmpdir(), 'pangular-token-')), 'mcp-token');
+    const saved = ['kept', 'across', 'restarts', 'x'.repeat(8)].join('-');
+    writeFileSync(file, `${saved}\n`, { mode: 0o644 });
+    vi.stubEnv('PANGULAR_MCP_TOKEN_FILE', file);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const mcp = await bootMcp({});
+    expect((await mcp(saved)).status).toBe(200);
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps the token another server wrote first, so both servers share one token', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pangular-token-'));
+    const file = join(dir, 'mcp-token');
+    expect(writeTokenOnce(file, 'first-server-token-0001')).toBe('first-server-token-0001');
+    // The second server read no file, then the first one wrote it before the second could.
+    expect(writeTokenOnce(file, 'second-server-token-002')).toBe('first-server-token-0001');
+    expect(readFileSync(file, 'utf8').trim()).toBe('first-server-token-0001');
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
+    // A file without a valid token is replaced.
+    writeFileSync(file, 'bad\n');
+    expect(writeTokenOnce(file, 'third-server-token-0003')).toBe('third-server-token-0003');
+    expect(readFileSync(file, 'utf8').trim()).toBe('third-server-token-0003');
+    expect(readdirSync(dir)).toEqual(['mcp-token']);
   });
 
   it('keeps the token and the mcp setting next to the devtools config', async () => {
@@ -310,6 +347,38 @@ describe('Pangular Inspector hub MCP route', () => {
     });
     expect((await own('env-secret')).status).toBe(401);
     expect((await own('own-secret')).status).toBe(200);
+  });
+
+  it('sends each tool tier to MCP clients as read-only and destructive hints', async () => {
+    type Listed = {
+      name: string;
+      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+    };
+    const list = async (options: PangularHubOptions) => {
+      const response = await (await bootMcp({ auth: false, ...options }))();
+      const text = await response.text();
+      const json = text.startsWith('{') ? text : /^data: (.*)$/m.exec(text)?.[1];
+      const tools = (JSON.parse(json ?? '{}') as { result?: { tools?: Listed[] } }).result?.tools;
+      return new Map((tools ?? []).map((tool) => [tool.name, tool.annotations ?? {}]));
+    };
+    const tools = await list({});
+    expect(tools.get('pangular_highlight')).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+    });
+    expect(tools.get('pangular_navigate')).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+    });
+    expect(tools.get('pangular_clear-recordings')).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    });
+    const readOnly = await list({ agent: { readOnly: true } });
+    expect(readOnly.size).toBeGreaterThan(0);
+    expect([...readOnly.values()].every((hints) => hints.readOnlyHint === true)).toBe(true);
+    expect(readOnly.has('pangular_clear-recordings')).toBe(false);
+    expect(readOnly.get('pangular_change-detection')).toMatchObject({ readOnlyHint: true });
   });
 
   it('keeps an explicit mcp setting', async () => {
@@ -349,12 +418,13 @@ describe('Pangular Inspector hub on a server that reloads server.ts', () => {
     const first = await boot();
     const second = await boot();
     await first.hub.close();
-    const tokens = log.mock.calls
-      .flat()
-      .join('\n')
-      .match(/MCP token: \S+/g);
-    expect(tokens).toHaveLength(1);
-    const token = tokens![0].slice('MCP token: '.length);
+    expect(
+      log.mock.calls
+        .flat()
+        .join('\n')
+        .match(/MCP token: /g),
+    ).toHaveLength(1);
+    const token = readFileSync(process.env['PANGULAR_MCP_TOKEN_FILE']!, 'utf8').trim();
     const mcp = await second.hub.handler(
       new Request('http://localhost/__devframes/__mcp', {
         method: 'POST',

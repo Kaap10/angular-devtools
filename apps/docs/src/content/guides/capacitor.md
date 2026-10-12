@@ -20,12 +20,12 @@ This guide adds the devtools to an Ionic or Capacitor *Angular app. The app runs
 
 ## Which setup you need
 
-| Your devtools server             | iOS simulator, Android emulator or USB device         | Phone over Wi-Fi, and any iPhone or iPad                                   |
-| -------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
-| Express hub in `server.ts`       | [Live reload on localhost](#live-reload-on-localhost) | [Live reload over Wi-Fi](#live-reload-over-wi-fi), with `allowedOrigins`   |
-| Vite plugin (Analog)             | [Live reload on localhost](#live-reload-on-localhost) | [Live reload over Wi-Fi](#live-reload-over-wi-fi), with `allowLan`         |
-| Standalone CLI behind `ng serve` | [Live reload on localhost](#live-reload-on-localhost) | [Live reload over Wi-Fi](#live-reload-over-wi-fi), with `--allowed-origin` |
-| Standalone CLI on its own        | [A bundled build](#a-bundled-build)                   | [A bundled build](#a-bundled-build)                                        |
+| Your devtools server             | iOS simulator, Android emulator or USB device         | Phone over Wi-Fi, and any iPhone or iPad                                                |
+| -------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Express hub in `server.ts`       | [Live reload on localhost](#live-reload-on-localhost) | [Live reload over Wi-Fi](#live-reload-over-wi-fi), with `allowLan` and `allowedOrigins` |
+| Vite plugin (Analog)             | [Live reload on localhost](#live-reload-on-localhost) | [Live reload over Wi-Fi](#live-reload-over-wi-fi), with `allowLan`                      |
+| Standalone CLI behind `ng serve` | [Live reload on localhost](#live-reload-on-localhost) | [Live reload over Wi-Fi](#live-reload-over-wi-fi), with `--allowed-origin`              |
+| Standalone CLI on its own        | [A bundled build](#a-bundled-build)                   | [A bundled build](#a-bundled-build)                                                     |
 
 USB applies to Android only: `adb reverse` forwards the port. An iPhone or iPad reaches your machine over the network, even when it is plugged in. Over Wi-Fi, the page's origin is your machine's network address, not `localhost`, so the server has to allow that origin. A bundled build works with the standalone CLI and the Express hub, and with the Vite plugin for iOS. See [Run the server where the device reaches it](#run-the-server-where-the-device-reaches-it).
 
@@ -58,7 +58,7 @@ A phone on Wi-Fi loads the app from your machine's network address, such as `htt
 
 | Server                           | Allow the page's origin                                                                                                                                                                                     |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Express hub                      | `initPangularHub({ws: false, allowedOrigins: ['http://192.168.1.20:4200']})`                                                                                                                                |
+| Express hub                      | `initPangularHub({ws: false, allowLan: true, allowedOrigins: ['http://192.168.1.20:4200']})`                                                                                                                |
 | Vite plugin                      | `pangular({allowLan: true, allowedOrigins: ['http://192.168.1.20:5173']})`, with Vite's `server.host: true`. See [Other devices on your network](../getting-started/vite.md#other-devices-on-your-network). |
 | Standalone CLI behind `ng serve` | `npx @pangular-inspector/devtools dev --allowed-origin http://192.168.1.20:4200`                                                                                                                            |
 
@@ -137,7 +137,7 @@ The short forms above carry no `configs`, so the overlay uses the default inspec
 | Phone over Wi-Fi        | Your machine's network address, such as `192.168.1.20`                     |
 | iPhone or iPad          | Your machine's network address, over Wi-Fi or USB                          |
 
-The standalone CLI and the Express hub accept `capacitor://localhost` and `https://localhost` without an `allowedOrigins` entry, because their host is `localhost`. The Vite plugin accepts `https://localhost` the same way, and `capacitor://localhost` once it is in `allowedOrigins`. That entry also turns the one-time code on.
+The standalone CLI and the Express hub accept `capacitor://localhost` and `https://localhost` without an `allowedOrigins` entry, because their host is `localhost`. The Vite plugin accepts `https://localhost` the same way, and `capacitor://localhost` once it is in `allowedOrigins`. A phone on Wi-Fi also needs `allowLan: true`, on the Express hub as on the Vite plugin.
 
 ### Let the app reach your machine
 
@@ -180,16 +180,16 @@ The simulator, the emulator and `adb reverse` reach your machine's `localhost`. 
 | Server         | How                                                                                                                                                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Standalone CLI | `npx @pangular-inspector/devtools dev --host 0.0.0.0` listens on every interface, `localhost` included.                                                                                                                       |
-| Express hub    | `app.listen(port)` listens on every interface by default. Under `ng serve`, pass `--host 0.0.0.0`.                                                                                                                            |
+| Express hub    | `app.listen(port)` listens on every interface by default. Under `ng serve`, pass `--host 0.0.0.0`. Pass `allowLan: true` to `initPangularHub()`.                                                                              |
 | Vite plugin    | For an iOS phone: `capacitor://localhost` in `allowedOrigins`, `allowLan: true`, and Vite started with `--host`. An Android phone can't use it over Wi-Fi: `https://localhost` is not a network origin, so use `adb reverse`. |
 
 Keep `localhost` in what the CLI listens on. With `--host 192.168.1.20` alone, the panel is only on that address, and the server refuses the panel's own origin there. Run the CLI in the app's folder, so the source scanners read its `src/`.
 
 ## The one-time code on a device
 
-The standalone CLI and the Express hub ask for a one-time code by default. When the app connects, it shows a dialog asking for the code, and the server prints the code in its terminal. Type the code in the app. The link the server prints next to it opens the server, not the app, so it doesn't help on a phone.
+The standalone CLI, the Express hub and the Vite plugin ask for a one-time code by default. When the app connects, it shows a dialog asking for the code, and the server prints the code in its terminal. Type the code in the app. The link the server prints next to it opens the server, not the app, so it doesn't help on a phone.
 
-The app keeps the token it gets in the WebView's storage for that origin. It asks again when that storage is cleared, and under live reload over Wi-Fi when your machine's address changes, since the origin changes with it. The Vite plugin leaves the code off while it only allows your machine, so it never asks.
+The app keeps the token it gets in the WebView's storage for that origin. It asks again when that storage is cleared, and under live reload over Wi-Fi when your machine's address changes, since the origin changes with it.
 
 To skip the dialog, give the server a [pairing token](../security.md#pairing-tokens) and pass it to `initOverlay` as `authToken`. See [Skip the one-time code](../getting-started/overlay.md#skip-the-one-time-code). A wrong token falls back to the dialog.
 
