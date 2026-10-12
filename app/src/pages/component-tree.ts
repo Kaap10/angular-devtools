@@ -33,6 +33,10 @@ import {
 import { CdRecording, type CdPage } from './cd-recording';
 import type { ComponentFocus } from '../types/component-focus.types';
 import { SourceLink } from '../ui/source-link';
+import { actionAllowed } from '../devtools-config';
+import { PropValue } from './component-prop-value';
+import { StoreGlobal } from '../ui/store-global';
+import { ForBlocksSection, type ForBlock } from './for-blocks-section';
 
 interface SourceComponent {
   selector: string;
@@ -59,6 +63,8 @@ interface Prop {
   value?: unknown;
   listened?: boolean;
   kind?: 'signal' | 'resource';
+  edit?: 'property' | 'signal';
+  locked?: string;
 }
 
 interface Dependency {
@@ -103,6 +109,8 @@ interface Page {
   deferBlocks?: DeferBlock[];
   /** The page has more defer blocks than the ones in `deferBlocks`. */
   deferTruncated?: boolean;
+  forBlocks?: ForBlock[];
+  forBlocksTruncated?: boolean;
   roots: LiveNode[];
   count: number;
   truncated?: boolean;
@@ -146,7 +154,7 @@ function bare(name: string): string {
 
 @Component({
   selector: 'app-component-tree',
-  imports: [JsonPipe, Select, CdRecording, SourceLink],
+  imports: [JsonPipe, Select, CdRecording, SourceLink, PropValue, StoreGlobal, ForBlocksSection],
   host: { '(keydown.escape)': 'cancelPick()' },
   template: `
     @if (live()) {
@@ -334,6 +342,15 @@ function bare(name: string): string {
                   </div>
                 }
               }
+              @if (!staticReport() && !native()) {
+                <app-store-global
+                  class="console-global"
+                  [rpc]="rpc()"
+                  [pageId]="page()?.pageId"
+                  [target]="{ kind: 'component', id: sel.id }"
+                  [label]="sel.name"
+                />
+              }
             </header>
 
             @if (detail(); as d) {
@@ -364,7 +381,13 @@ function bare(name: string): string {
                             <span class="muted">({{ p.prop }})</span>
                           }
                         </span>
-                        <pre>{{ p.value | json }}</pre>
+                        <app-prop-value
+                          [prop]="p"
+                          [componentId]="d.id"
+                          [pageId]="page()?.pageId ?? null"
+                          [rpc]="rpc()"
+                          [writes]="canEdit()"
+                        />
                       </li>
                     }
                   </ul>
@@ -405,7 +428,13 @@ function bare(name: string): string {
                             <span class="flag">{{ p.kind }}</span>
                           }
                         </span>
-                        <pre>{{ p.value | json }}</pre>
+                        <app-prop-value
+                          [prop]="p"
+                          [componentId]="d.id"
+                          [pageId]="page()?.pageId ?? null"
+                          [rpc]="rpc()"
+                          [writes]="canEdit()"
+                        />
                       </li>
                     }
                   </ul>
@@ -552,6 +581,13 @@ function bare(name: string): string {
           </ul>
         </section>
       }
+      <app-for-blocks
+        [blocks]="page()?.forBlocks"
+        [truncated]="page()?.forBlocksTruncated === true"
+        [supported]="page()?.deferBlocks && !page()?.forBlocks ? false : null"
+        (showOwner)="showForOwner($event)"
+        (highlight)="highlight($event)"
+      />
       @if (!staticReport() && !native()) {
         <app-cd-recording [page]="cdPage()" [pageId]="page()!.pageId" [rpc]="rpc()" />
       }
@@ -1442,6 +1478,14 @@ export class ComponentTree {
 
   readonly live = computed(() => (this.page()?.roots.length ?? 0) > 0);
   readonly native = computed(() => isNativePage(this.page()));
+  /** Inputs, properties and writable signals are editable on a live browser page. */
+  readonly canEdit = computed(
+    () =>
+      this.live() &&
+      !this.native() &&
+      !this.staticReport() &&
+      actionAllowed(this.rpc(), 'components'),
+  );
   readonly devtoolsActions = computed(
     () => this.bridge.available && !!this.page() && !this.native() && !this.staticReport(),
   );
@@ -1835,7 +1879,7 @@ export class ComponentTree {
     if (!client) return;
     void client
       .scope('pangular')
-      .rpc.call('select-component', { pageId: this.page()?.pageId, id })
+      .rpc.call('select-component', { pageId: this.page()?.pageId, id, console: true })
       .catch(() => {});
   }
 
@@ -1935,6 +1979,10 @@ export class ComponentTree {
   }
 
   showOwner(block: DeferBlock) {
+    if (block.owner && this.index().map.has(block.owner.id)) this.reveal(block.owner.id);
+  }
+
+  showForOwner(block: ForBlock) {
     if (block.owner && this.index().map.has(block.owner.id)) this.reveal(block.owner.id);
   }
 

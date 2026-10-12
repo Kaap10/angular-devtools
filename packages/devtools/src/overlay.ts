@@ -44,8 +44,11 @@ import { registerSignalPeek } from './signal-peek.ts';
 export { installSignalWriteHook } from './signal-history.ts';
 import { collectComponentTree, componentHostOf } from './component-tree.ts';
 import { startComponentPick } from './component-pick.ts';
+import { registerComponentEdit } from './component-edit-overlay.ts';
 import { installSourceHelpers } from './component-source.ts';
 import { createDeferTracker } from './defer-blocks.ts';
+import { controlFlowReader, createForTracker } from './for-blocks.ts';
+import { attachConsoleGlobals } from './console-handles.ts';
 import { elementById, elementId } from './element-id.ts';
 import {
   collectSignalGraph,
@@ -282,17 +285,20 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
 
   let componentTarget: string | null = null;
   const deferTracker = createDeferTracker();
+  const forTracker = createForTracker();
   let lastTreeJson = '';
   let treeSentAt = 0;
   async function pushTree(force = false) {
     const ng = getNg();
-    const deferBlocks = deferTracker.collect(ng);
+    const blocksOf = controlFlowReader(ng);
+    const deferBlocks = deferTracker.collect(ng, document, blocksOf);
     const tree = {
       ...collectComponentTree(ng, { selectedId: componentTarget }),
       url: redactUrl(location.href),
       title: redactMessage(document.title),
       ...(deferBlocks ? { deferBlocks } : {}),
       ...(deferTracker.truncated ? { deferTruncated: true } : {}),
+      ...forTracker.collect(ng, document, blocksOf),
     };
     const json = JSON.stringify(tree);
     if (!force && json === lastTreeJson) {
@@ -425,6 +431,12 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     ? attachChangeDetection(my, pageId, getNg, limits.cdCycles, tickMs)
     : null;
   const ngrx = on.ngrx ? attachNgrx(my, pageId, getNg, limits.changeLog) : null;
+  const consoleGlobals = attachConsoleGlobals(my, pageId, {
+    getNg,
+    inspectors: on,
+    ngrxState: ngrx?.rawState,
+  });
+  own(consoleGlobals.dispose);
 
   const navigations: NavigationRecord[] = [];
   const preloads: PreloadRecord[] = [];
@@ -729,9 +741,13 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     name: 'inspect-component-in-page',
     type: 'event',
     jsonSerializable: true,
-    handler: (request: { pageId?: string; id?: string | null } | null) => {
+    handler: (request: { pageId?: string; id?: string | null; console?: boolean } | null) => {
       if (request?.pageId && request.pageId !== pageId) return;
       componentTarget = typeof request?.id === 'string' ? request.id : null;
+      // Only a selection made in the panel for this page sets `$ng0`.
+      if (request?.console === true && request.pageId === pageId) {
+        consoleGlobals.selectComponent(componentTarget);
+      }
       void pushTree(true).catch(() => {});
     },
   });
@@ -756,6 +772,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
           if (cancelComponentPick === pick.cancel) cancelComponentPick = null;
           if (result.ok) {
             componentTarget = result.id;
+            consoleGlobals.selectComponent(result.id);
             void pushTree(true).catch(() => {});
             if (result.openInEditor && result.source) {
               void my.rpc.call('open-in-editor', result.source).catch(() => {});
@@ -766,6 +783,11 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       },
     });
     own(() => cancelComponentPick?.());
+    registerComponentEdit(my.rpc, pageId, {
+      getNg,
+      allowed: devtoolsConfig.actions.components,
+      edited: () => void pushTree(true).catch(() => {}),
+    });
 
     const componentOf = (el: unknown) => {
       const host = el instanceof Element ? componentHostOf(getNg(), el) : null;

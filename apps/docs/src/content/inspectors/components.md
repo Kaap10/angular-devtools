@@ -1,6 +1,6 @@
 ---
 title: Components
-description: Every component instance on the page, with live inputs, properties, outputs, injected services and defer blocks.
+description: Every component instance on the page, with live inputs, properties, outputs, injected services, defer blocks and @for blocks.
 ---
 
 <ngmd-hero title="Components" gradient>
@@ -53,6 +53,8 @@ The buttons only work for the tab that DevTools inspects. They don't appear in t
 
 When a form exists in the same source file, a **Show … in Forms** button opens it in the [Forms tab](./forms.md).
 
+**Store as global** stores the selected instance in the page console as `temp1`, then `temp2` and so on, and shows the name it used, for example **Stored as temp1.** See [Console handles](#console-handles).
+
 ### Facts
 
 - **Change detection**: `OnPush` or `Eager`.
@@ -73,6 +75,20 @@ A fact shows **Unknown** when Angular does not report it.
 
 **Properties** lists the component's other own fields: plain fields, state objects, signals and resources. It leaves out inputs, outputs, methods and injected services. Signals show their current value and a **signal** flag. A field that holds a `resource()` or `httpResource()` shows its status, value and error, with a **resource** flag.
 
+### Editing values
+
+On a live browser page, each input, property and writable signal of the selected component has an **Edit** button. **Edit** opens a field with the value as JSON. Type a new JSON value, such as `"Paris"`, `42`, `true` or `{"page": 2}`. Press Enter or **Apply** to write it, or Escape or **Cancel** to leave it. If the page refuses the write, the reason shows under the field.
+
+| Value                                                           | How the page writes it                                                           |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `signal()`, `linkedSignal()` or `model()`                       | Calls `.set()`. A `model()` also emits its change, so a two-way binding follows. |
+| A decorator input or a plain field                              | Assigns the value, then runs change detection with `ng.applyChanges`.            |
+| A signal input, `computed()`, `asReadonly()` signal or resource | No **Edit**. The row says why, for example that a parent binding sets the input. |
+
+A row also has no **Edit** when its value is not JSON (a class instance, `Map` or `Date`), when it is redacted, or when the panel shows it shortened. A parent binding sets a bound input again the next time its own value changes, so the edit lasts until then. Directive inputs are read-only.
+
+Set [`actions.components`](../getting-started/configuration.md#actions) to `false` to turn editing off. Agents write the same values with [`set-component-property` and `set-signal`](../agents/tools.md#edit-a-component).
+
 ### Injected services
 
 **Injected** lists each token the component class injects, with its flags and the injector that provided it. The block marks a token nobody provides as **not provided**. The block leaves out tokens that host directives inject. Use the [Injectors tab](./injectors.md) for those.
@@ -84,6 +100,20 @@ When the page renders `@defer` blocks, a **Defer blocks** list follows the tree.
 Hover or focus a row to highlight the block in the page. Click it to select the component that holds it. The list is hidden when the page renders no defer blocks, or when its Angular version has no util to read them.
 
 The list holds the first 500 blocks of a page. When the page has more, the count reads **500+**.
+
+### For blocks
+
+When the page renders `@for` blocks, an **&#64;for blocks** list follows the defer blocks. Each row shows the component whose template holds the block, its item count, whether it has an `@empty` block (**&#64;empty showing** when it shows) and what its `track` expression tracks by:
+
+| Label              | Template                                      |
+| ------------------ | --------------------------------------------- |
+| `track $index`     | `track $index`                                |
+| `track item`       | `track item`, where `item` is the loop item   |
+| `track expression` | Any other expression, such as `track trip.id` |
+
+A block with no items and no `@empty` block is marked **renders nothing**. Hover or focus a row to highlight the block in the page. Click it to select the component that holds it. The page lists up to 500 blocks, and the count reads **500+** past that.
+
+The list needs Angular 22.0 or later in a development build. On an older Angular, the section says that the page does not report `@for` blocks.
 
 ### Change detection
 
@@ -120,15 +150,16 @@ A notice at the top says why you see the source list: no page is connected, or t
 
 The live tree reads `window.ng`, which only development builds expose. It uses these functions:
 
-| Function                                                                   | Used for                                                            |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `ng.getComponent`, `ng.getDirectives`                                      | Finding instances and the directives on each host.                  |
-| `ng.getDirectiveMetadata`                                                  | Inputs, outputs, change detection and encapsulation.                |
-| `ɵcmp.debugInfo` on the component class                                    | The source file and line in the detail header.                      |
-| `ng.isSignal`                                                              | Unwrapping signal inputs.                                           |
-| `ng.getListeners`                                                          | Output listeners and DOM listeners.                                 |
-| `ng.getInjector`, `ɵgetDependenciesFromInjectable`, `ɵgetInjectorMetadata` | The **Injected** block, and the services **Properties** leaves out. |
-| `ng.ɵgetControlFlowBlocks`, or `ng.ɵgetDeferBlocks` before Angular 22      | The **Defer blocks** list.                                          |
+| Function                                                                   | Used for                                                                     |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `ng.getComponent`, `ng.getDirectives`                                      | Finding instances and the directives on each host.                           |
+| `ng.getDirectiveMetadata`                                                  | Inputs, outputs, change detection and encapsulation.                         |
+| `ɵcmp.debugInfo` on the component class                                    | The source file and line in the detail header.                               |
+| `ng.isSignal`                                                              | Unwrapping signal inputs.                                                    |
+| `ng.getListeners`                                                          | Output listeners and DOM listeners.                                          |
+| `ng.applyChanges`                                                          | Refreshing the view after an edit to an input or a plain field.              |
+| `ng.getInjector`, `ɵgetDependenciesFromInjectable`, `ɵgetInjectorMetadata` | The **Injected** block, and the services **Properties** leaves out.          |
+| `ng.ɵgetControlFlowBlocks`, or `ng.ɵgetDeferBlocks` before Angular 22      | The **Defer blocks** list, and from Angular 22 the **&#64;for blocks** list. |
 
 ### Refresh rate
 
@@ -217,6 +248,24 @@ To go the other way, select a component and click **Reveal in Elements** in its 
   </ngmd-step>
 </ngmd-workflow>
 
+### Console handles
+
+When you select a component in the panel, the page sets `$ng0` in its console to that instance. The previous selections move to `$ng1` through `$ng4`, newest first, so the last five stay at hand. Selecting the same instance again keeps the order, and an earlier one moves back to `$ng0`. **Pick component on page** sets `$ng0` too. Selections made by an agent tool don't.
+
+**Store as global** in the detail header, in the provider rows of the [Injectors tab](./injectors.md#store-a-provider-as-a-global) and next to the state on the [NgRx tab](./ngrx-store.md#store-the-state-as-a-global) stores a value as `temp1`, then the first free `tempN`.
+
+| Rule                    | Detail                                                                                                                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One page                | Only the tab that owns the selection writes the globals. Other tabs of the app don't change.                                                                                                              |
+| Page globals stay       | The overlay never overwrites a `$ngN` or `tempN` the page set itself. It skips that name.                                                                                                                 |
+| Nothing leaves the page | The value stays in the page. Only the variable name comes back to the panel.                                                                                                                              |
+| Cleanup                 | When the overlay stops, it removes the globals it still owns.                                                                                                                                             |
+| Components inspector    | `$ng0` and **Store as global** for a component need the Components inspector on. They don't change the app, so the [`actions`](../getting-started/configuration.md#actions) option doesn't turn them off. |
+
+`$ng0` and a stored component hold the live instance, the same object `ng.getComponent($0)` returns in the console. Read a signal input with `$ng0.title()`.
+
+The console handles need the browser overlay. The Angular Native and NativeScript overlays don't set them.
+
 ### Keyboard
 
 Use the arrow keys, Home and End to move through the tree. The right arrow expands a row or moves to its first child. The left arrow collapses a row or moves to its parent. The `*` key expands the focused row and every row at the same level under the same parent.
@@ -227,15 +276,18 @@ Press Escape in the filter box to clear it. When the filter matches nothing, **C
 
 ## Agent tools
 
-| Tool or resource             | Kind     | What it does                                                                                                                                                                          |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pangular:get-components`    | tool     | Lists components and directives from source, with selector, kind, inputs, outputs, change detection, file and line.                                                                   |
-| `pangular:highlight`         | tool     | Highlights a component in the page and selects it. Takes an instance id, class name, host tag or CSS selector. Also retargets the Signals graph. Lists every instance a name matches. |
-| `pangular:inspect-component` | tool     | Selects one instance and returns its live detail: inputs, outputs, properties, listeners, directives and injected services.                                                           |
-| `pangular:list-components`   | tool     | Returns the live tree of one page as an indented outline with routed and directive markers. Takes a `filter` and a `depth`.                                                           |
-| `pangular:defer-blocks`      | tool     | Lists the `@defer` blocks of each page, and flags blocks that failed, blocks stuck on their placeholder and blocks still dehydrated.                                                  |
-| `pangular:change-detection`  | tool     | Starts, stops or clears a change detection recording, and returns the slowest and most often checked components and the latest cycles.                                                |
-| `pangular:component-tree`    | resource | The live tree per page, with the detail of the selected instance and the defer blocks.                                                                                                |
+| Tool or resource                  | Kind     | What it does                                                                                                                                                                          |
+| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pangular:get-components`         | tool     | Lists components and directives from source, with selector, kind, inputs, outputs, change detection, file and line.                                                                   |
+| `pangular:highlight`              | tool     | Highlights a component in the page and selects it. Takes an instance id, class name, host tag or CSS selector. Also retargets the Signals graph. Lists every instance a name matches. |
+| `pangular:inspect-component`      | tool     | Selects one instance and returns its live detail: inputs, outputs, properties, listeners, directives and injected services.                                                           |
+| `pangular:list-components`        | tool     | Returns the live tree of one page as an indented outline with routed and directive markers. Takes a `filter` and a `depth`.                                                           |
+| `pangular:defer-blocks`           | tool     | Lists the `@defer` blocks of each page, and flags blocks that failed, blocks stuck on their placeholder and blocks still dehydrated.                                                  |
+| `pangular:for-blocks`             | tool     | Lists the `@for` blocks of each page with their item count, track kind and `@empty` block.                                                                                            |
+| `pangular:change-detection`       | tool     | Starts, stops or clears a change detection recording, and returns the slowest and most often checked components and the latest cycles.                                                |
+| `pangular:set-component-property` | tool     | Writes an input or property of one instance and runs change detection. An action.                                                                                                     |
+| `pangular:set-signal`             | tool     | Sets a writable signal that one instance holds as a property. An action.                                                                                                              |
+| `pangular:component-tree`         | resource | The live tree per page, with the detail of the selected instance and the defer blocks.                                                                                                |
 
 See [Tools](../agents/tools.md) and [Resources](../agents/resources.md).
 

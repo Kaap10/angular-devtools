@@ -4,7 +4,7 @@ description: Every agent tool the devtools expose, grouped by inspector, with wh
 ---
 
 <ngmd-hero title="Tools" logo="https://cdn.simpleicons.org/modelcontextprotocol/71717A" gradient>
-  Sixty-two tools, grouped by inspector. Each one answers a question you would otherwise answer by clicking through the panel.
+  Sixty-five tools, grouped by inspector. Each one answers a question you would otherwise answer by clicking through the panel.
 </ngmd-hero>
 
 # Tools
@@ -35,7 +35,7 @@ Each tool reads from one of three places. The stdio server registers only the to
 
 ### The page argument
 
-Most page tools take an optional `page` argument to pick a browser tab. It defaults to the most recent one. `dispatch-ngrx-action` refuses to guess when more than one tab could take the action. `form-action` and `fill-form` take the tab from the form id instead (the part after `@`, as in `Checkout.form@ab12`). `highlight` and `inspect-component` search every tab without it, newest first, and `defer-blocks` lists every tab. `inspect-providers`, `highlight`, `inspect-component` and `defer-blocks` also accept `pageId`. The tables below leave `page` out.
+Most page tools take an optional `page` argument to pick a browser tab. It defaults to the most recent one. `dispatch-ngrx-action`, `set-component-property` and `set-signal` refuse to guess when more than one tab could take the action. `form-action` and `fill-form` take the tab from the form id instead (the part after `@`, as in `Checkout.form@ab12`). `highlight` and `inspect-component` search every tab without it, newest first, and `defer-blocks` and `for-blocks` list every tab. `inspect-providers`, `highlight`, `inspect-component`, `defer-blocks` and `for-blocks` also accept `pageId`. The tables below leave `page` out.
 
 If `page` names a tab that doesn't report that data, the tool answers `No page <id> is reporting ...` and lists the tabs that do, newest first. It never falls back to another tab. Without `page`, a class name or tag resolves on the most recent tab that has it, and `highlight` names the other tabs where it also matches.
 
@@ -49,14 +49,14 @@ The URL comes from the HTTP or router report. A page that sends neither (no rout
 
 Every tool has one of three safety tiers. The server sends the tier to your client as the tool's read-only and destructive hints.
 
-| Tier          | What the tool can do                                                                                              | Tools                                                                                                                                      |
-| ------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `read`        | Reads your source, the page or the server. `highlight` only shows and selects a component.                        | Every other tool, and every resource                                                                                                       |
-| `action`      | Changes the running page, the server's fault rules or what the page records. A reload or the next call undoes it. | `navigate`, `dispatch-ngrx-action`, `form-action`, `fill-form`, `set-http-rule`, `remove-http-rule`, `record-pipes` and `change-detection` |
-| `destructive` | Can lose data: it erases recordings, or sends writes to your own API routes.                                      | `clear-recordings` and `analog-call-api`                                                                                                   |
+| Tier          | What the tool can do                                                                                              | Tools                                                                                                                                                                              |
+| ------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`        | Reads your source, the page or the server. `highlight` only shows and selects a component.                        | Every other tool, and every resource                                                                                                                                               |
+| `action`      | Changes the running page, the server's fault rules or what the page records. A reload or the next call undoes it. | `navigate`, `dispatch-ngrx-action`, `form-action`, `fill-form`, `set-http-rule`, `remove-http-rule`, `set-component-property`, `set-signal`, `record-pipes` and `change-detection` |
+| `destructive` | Can lose data: it erases recordings, or sends writes to your own API routes.                                      | `clear-recordings` and `analog-call-api`                                                                                                                                           |
 
 <ngmd-alert severity="important">
-  The ten <code>action</code> and <code>destructive</code> tools act on the app. Your client can ask you before it runs them.
+  The twelve <code>action</code> and <code>destructive</code> tools act on the app. Your client can ask you before it runs them.
 </ngmd-alert>
 
 When the hub is mounted, each finished call of an `action` or `destructive` tool posts an `Agent ran <tool>` message to the hub, so you can see what the agent changed. `change-detection` posts only when it starts, stops or clears a recording. See [Messages and badges](../getting-started/popup-and-hub.md#messages-and-badges).
@@ -136,6 +136,26 @@ Without a development build, the page has no util to read defer blocks, and the 
 
 Each page lists at most 50 blocks in the table and 50 under **Needs attention**, with a note on how many more are not shown. The whole answer stops at 20,000 characters. If several tabs report, pass `page` to read one. The **Defer blocks** list on the [Components](../inspectors/components.md#defer-blocks) page has every block the page reported. A page reports its first 500 blocks. When it has more, the answer says so.
 
+### for-blocks
+
+The `@for` blocks of each page: the component that holds each one, its item count, what its `track` expression tracks by and whether it has an `@empty` block and shows it. A block with no items and no `@empty` block gets a note that it renders nothing. Reads: page.
+
+| Argument | Required | Value           |
+| -------- | -------- | --------------- |
+| `pageId` | no       | Same as `page`. |
+
+Angular reports the `track` expression as one of three kinds, not as its source text:
+
+| Tracks by       | Template                                      |
+| --------------- | --------------------------------------------- |
+| `$index`        | `track $index`                                |
+| the item itself | `track item`, where `item` is the loop item   |
+| an expression   | Any other expression, such as `track trip.id` |
+
+The page reads the blocks with `ng.ɵgetControlFlowBlocks`, which Angular 22.0 added for development builds. On an older Angular or a production build, the answer says the page cannot list them. The page sends the item count only, never the items.
+
+Each page lists at most 50 blocks, with a note on how many more are not shown, and says when the page has more than the 500 blocks it reports. The whole answer stops at 20,000 characters. If several tabs report, pass `page` to read one. The **&#64;for blocks** list on the [Components](../inspectors/components.md#for-blocks) page has every block.
+
 ### change-detection <ngmd-badge variant="alpha">Action</ngmd-badge>
 
 Change detection cycles recorded with Angular's profiler: the slowest components by self time, the most often checked components, and the latest cycles with their duration, component checks, sync passes and the output that ran before each one. Reads: page. Needs Angular 20 or later.
@@ -146,6 +166,31 @@ Change detection cycles recorded with Angular's profiler: the slowest components
 | `limit`  | no       | Rows per list. Default 10, at most 50.                                                                                                                                           |
 
 Without `page`, it reads the page that is recording, and `record` goes to every connected page. A `page` that names no connected tab gets the list of connected tabs. A connected tab that has not recorded yet gets a hint to start a recording there. The answer starts with the change detection mode of the page it reports on: zoneless, zone.js, or zoneless with zone.js still loaded. Recording is off until the panel or this tool starts it. Call it with `record: "start"`, use the app, then call it again without `record`. With `agent.readOnly`, the tool has no `record` argument and is marked read-only, so start the recording from the panel. When older cycles were dropped at [`limits.cdCycles`](../getting-started/configuration.md#limits), the answer says how many. A recording lists at most 100 component classes and counts checks for up to 2000 instances. When it checked more, the answer says how many were left out.
+
+### Edit a component <ngmd-badge variant="alpha">Action</ngmd-badge>
+
+`set-component-property` and `set-signal` write a JSON value to one live component instance, in development only, and answer with the value it now holds, redacted like the component detail. Reads: page.
+
+| Tool                     | Writes                                                                                          | How                                                                   |
+| ------------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `set-component-property` | An input or another property. Signals are refused; use `set-signal`.                            | Assigns the value, then runs change detection with `ng.applyChanges`. |
+| `set-signal`             | A writable signal the component holds as a property: `signal()`, `linkedSignal()` or `model()`. | Calls `.set()`.                                                       |
+
+| Argument    | Tool                     | Value                                                                                                                           |
+| ----------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `component` | both                     | An instance id from the `component-tree` resource, or a class name or host tag that matches one instance.                       |
+| `property`  | `set-component-property` | The class property or public input name, or a path inside its value, like `user.name` or `items[0].title`.                      |
+| `signal`    | `set-signal`             | The signal property, or a path inside its value, like `filters.query`. The signal is set to a copy with that one value changed. |
+| `value`     | both                     | The new value as JSON.                                                                                                          |
+
+Both tools refuse, and write nothing, when:
+
+- the target is a signal input (`input()` or `input.required()`), a `computed()` or an `asReadonly()` signal, a getter without a setter, a method or an output
+- the value is not JSON, or the target holds a class instance, `Map`, `Date` or function
+- a name on the path is redacted, or the target holds a redacted value (see [What is redacted](../security.md#what-is-redacted))
+- a class name or tag matches several instances, or more than one tab reports components and `page` is missing
+
+A parent binding sets a bound input again the next time its own value changes. Only signals held as component properties can be set; the signals that `inspect-signals` lists elsewhere cannot. Set [`actions.components`](../getting-started/configuration.md#actions) to `false` to drop both tools.
 
 ### inspect-signals
 
