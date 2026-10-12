@@ -1,6 +1,10 @@
 import type { DevframeHubContext } from '@devframes/hub/node';
-import type { DevframeViewIframe } from '@devframes/hub/types';
-import { PANGULAR_LOGO_DATA_URI } from './brand.ts';
+import type {
+  DevframeDockBadgeVariant,
+  DevframeViewGroup,
+  DevframeViewIframe,
+} from '@devframes/hub/types';
+import { PANGULAR_LOGO_DATA_URI, PANGULAR_PRIMARY_COLOR } from './brand.ts';
 import {
   HUB_ALL_TOOLS,
   HUB_VIEWS,
@@ -47,6 +51,17 @@ export function dockId(view: HubView): string {
 /** The dock that opens the full panel, with every tab, instead of one view. */
 export const ALL_TOOLS_DOCK_ID = hubDockId(HUB_ALL_TOOLS);
 
+/** The dock group that holds every Pangular dock behind one rail button. */
+export const PANGULAR_GROUP_ID = hubDockId('group');
+
+/** A dock's count of unseen items; `undefined` clears it. */
+export interface HubDockBadge {
+  text: string;
+  variant: DevframeDockBadgeVariant;
+  /** The worst unseen item, which the title names: `with errors` or `with warnings`. */
+  severity?: 'error' | 'warning';
+}
+
 /** The views whose dock says when the tool has nothing to show yet. */
 export const STATUS_VIEWS = ['analog', 'angular-native', 'capacitor'] as const;
 export type StatusView = (typeof STATUS_VIEWS)[number];
@@ -62,13 +77,20 @@ export const UNAVAILABLE_TITLES: Record<StatusView, string> = {
 export type HubDockAvailability = Partial<Record<StatusView, boolean>>;
 
 export interface HubDocks {
-  /** The ids of the registered docks, in rail order. */
+  /** The ids of the registered docks, in rail order. The group is not one of them. */
   ids: string[];
+  /** The id of the group the docks belong to. */
+  groupId: string;
   /**
    * Marks a tool's dock as having data or not. The hub re-sends every dock to
    * every client on an update, so this only updates when the state changes.
    */
   setAvailable: (view: StatusView, available: boolean) => void;
+  /**
+   * Sets or clears the badge of a dock or of the group. Only updates the hub
+   * when the badge changes.
+   */
+  setBadge: (id: string, badge: HubDockBadge | undefined) => void;
 }
 
 function isHub(ctx: unknown): ctx is DevframeHubContext {
@@ -85,9 +107,16 @@ function withStatus(
   available: boolean,
 ): DevframeViewIframe {
   if (available || !isStatusView(view)) return entry;
-  // The title only: the hub fades a badge with its button, so a badge would
-  // fail the contrast check and cover the icon.
+  // The title only: a badge would cover the icon and read as a count.
   return { ...entry, title: UNAVAILABLE_TITLES[view] };
+}
+
+const SEVERITY_NOTES = { error: ', with errors', warning: ', with warnings' } as const;
+
+/** The dock title with its badge, as `Angular (2 new, with errors)`. */
+export function badgeTitle(title: string, badge: HubDockBadge): string {
+  const note = badge.severity ? SEVERITY_NOTES[badge.severity] : '';
+  return `${title} (${badge.text} new${note})`;
 }
 
 export function registerHubDocks(
@@ -99,6 +128,18 @@ export function registerHubDocks(
   if (!isHub(ctx)) return undefined;
   const base = ctx.frames.find((frame) => frame.id === id)?.base;
   if (!base) return undefined;
+  // One rail button for every Pangular dock. Picking it opens the member
+  // picked last, or All tools the first time.
+  const group: DevframeViewGroup = {
+    type: 'group',
+    id: PANGULAR_GROUP_ID,
+    title: 'Pangular',
+    icon: PANGULAR_LOGO_DATA_URI,
+    category: 'framework',
+    defaultChildId: ALL_TOOLS_DOCK_ID,
+    accentColor: PANGULAR_PRIMARY_COLOR,
+  };
+  ctx.docks.register(group);
   // Lower orders come first on the rail. The full panel shares the views'
   // frame, and the panel switches between them in place when a dock is picked.
   const allTools: DevframeViewIframe = {
@@ -110,11 +151,35 @@ export function registerHubDocks(
     defaultOrder: -1,
     url: base,
     frameId: 'pangular',
+    groupId: group.id,
   };
   ctx.docks.register(allTools);
   const ids = [allTools.id];
-  const plain = new Map<StatusView, DevframeViewIframe>();
+  const plain = new Map<string, DevframeViewIframe | DevframeViewGroup>([
+    [group.id, group],
+    [allTools.id, allTools],
+  ]);
+  const views = new Map<string, HubView>();
   const available = new Map<StatusView, boolean>();
+  const badges = new Map<string, HubDockBadge>();
+  const render = (entryId: string) => {
+    const entry = plain.get(entryId)!;
+    const badge = badges.get(entryId);
+    const view = views.get(entryId);
+    const shown =
+      view && entry.type === 'iframe' && isStatusView(view)
+        ? withStatus(entry, view, available.get(view) ?? true)
+        : entry;
+    if (!badge) return shown;
+    // The hub labels the button with the title alone, so the count goes there
+    // too for screen readers.
+    return {
+      ...shown,
+      title: badgeTitle(shown.title, badge),
+      badge: badge.text,
+      badgeVariant: badge.variant,
+    };
+  };
   DOCKS.forEach((dock, index) => {
     if (dock.inspector && !config.inspectors[dock.inspector]) return;
     const entry: DevframeViewIframe = {
@@ -126,25 +191,36 @@ export function registerHubDocks(
       defaultOrder: index,
       url: `${base}?view=${dock.view}`,
       frameId: 'pangular',
+      groupId: group.id,
     };
-    if (isStatusView(dock.view)) {
-      const has = initial[dock.view] ?? true;
-      plain.set(dock.view, entry);
-      available.set(dock.view, has);
-      ctx.docks.register(withStatus(entry, dock.view, has));
-    } else {
-      ctx.docks.register(entry);
-    }
+    plain.set(entry.id, entry);
+    views.set(entry.id, dock.view);
+    if (isStatusView(dock.view)) available.set(dock.view, initial[dock.view] ?? true);
+    ctx.docks.register(render(entry.id));
     ids.push(entry.id);
   });
   return {
     ids,
+    groupId: group.id,
     setAvailable: (view, has) => {
-      const entry = plain.get(view);
-      if (!entry || available.get(view) === has) return;
+      if (!available.has(view) || available.get(view) === has) return;
       available.set(view, has);
       // A whole entry, so the plain title replaces the explaining one.
-      ctx.docks.update(withStatus(entry, view, has));
+      ctx.docks.update(render(dockId(view)));
+    },
+    setBadge: (entryId, badge) => {
+      if (!plain.has(entryId)) return;
+      const current = badges.get(entryId);
+      if (
+        current?.text === badge?.text &&
+        current?.variant === badge?.variant &&
+        current?.severity === badge?.severity
+      ) {
+        return;
+      }
+      if (badge) badges.set(entryId, badge);
+      else badges.delete(entryId);
+      ctx.docks.update(render(entryId));
     },
   };
 }

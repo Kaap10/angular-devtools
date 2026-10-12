@@ -142,7 +142,7 @@ The HTTP MCP endpoint answers only requests that carry a loopback `Origin` heade
 
 While the one-time code is on, the endpoint also asks for a bearer token. That is the default for the Express hub and the Vite plugin. The hub writes a generated token to `~/.pangular-inspector/mcp-token`, a file only you can read (mode `0600`), and prints the path, not the token. It keeps that token across restarts. Set `PANGULAR_MCP_TOKEN` to choose the token yourself, or `PANGULAR_MCP_TOKEN_FILE` to use another file. Requests without the right `Authorization: Bearer <token>` header get `401`. The stdio server needs no token. See [Send a token](./agents/mcp-server.md#send-a-token).
 
-The Express hub answers MCP requests from other addresses only with `allowLan: true`, and then only those that send the right token and a loopback `Origin`. Any client can set that header, so treat the token like a password.
+The Express hub answers MCP requests from other addresses only with `allowLan: true`, and then only those that send the right token and a loopback `Origin`. Any client can set that header, so treat the token like a password. Over plain `http`, the token crosses the network in clear text: serve the hub over TLS for other machines, or keep it to a network you trust. `pangular mcp --print-config` warns about this for a non-loopback `--host` and takes `--https` for a server behind TLS.
 
 ### Chrome extension
 
@@ -157,6 +157,17 @@ Granting the extension a host doesn't change what the devtools server accepts. T
 Every installed extension can send requests to a loopback host, with its own `chrome-extension://<id>` origin. So the Vite plugin and the Express hub accept one extension by default: `chrome-extension://dcogniffeelebaolkkfbopmjcblhblfk`. The `key` in the extension manifest fixes that ID, so the unpacked extension and the store build share it. Every other extension origin is refused.
 
 If you build the extension with another `key`, add its origin to `allowedOrigins`. Each entry names one extension. The ID is on the extension card in `chrome://extensions`. See [Server origin](./getting-started/chrome-extension.md#server-origin).
+
+### Open in editor
+
+The panel and the overlay can ask the server to open a source file in your editor (see [Open a file in your editor](./inspectors/components.md#open-a-file-in-your-editor)). The request goes through the same gate and one-time code as every other call. The server then checks the path before it starts the editor:
+
+- It resolves the path against the workspace root, the directory the server runs in and the served app. A path that leaves all of them, with `..` or as an absolute path, is refused.
+- It follows symlinks and refuses the file when its real path is outside those directories.
+- It opens regular files only. Folders and missing files are refused.
+- Line and column must be positive whole numbers, or they are left out.
+
+The request names a file and a line, never a command. The editor comes from the server's environment. Agent tools can't open files.
 
 ### Page ownership
 

@@ -5,7 +5,10 @@ import { registerHubDocks } from '../hub-docks.ts';
 
 interface Entry {
   id: string;
+  type?: string;
   title: string;
+  groupId?: string;
+  defaultChildId?: string;
   url?: string;
   badge?: string;
   badgeVariant?: string;
@@ -57,6 +60,58 @@ describe('hub docks', () => {
     docks?.setAvailable('capacitor', false);
     expect(hub.docks.update).not.toHaveBeenCalled();
     expect(hub.docks.views.has('pangular:capacitor')).toBe(false);
+  });
+
+  it('puts every dock in one Pangular group, registered first, that opens All tools', () => {
+    const hub = fakeHub();
+    const docks = registerHubDocks(hub, 'pangular');
+    const [first, ...members] = hub.docks.register.mock.calls.map(([entry]) => entry);
+    expect(first).toMatchObject({
+      type: 'group',
+      id: 'pangular:group',
+      title: 'Pangular',
+      defaultChildId: 'pangular:all',
+    });
+    expect(first?.groupId).toBeUndefined();
+    expect(docks?.groupId).toBe('pangular:group');
+    expect(members.map((entry) => entry.id)).toEqual(docks?.ids);
+    expect(members.every((entry) => entry.groupId === 'pangular:group')).toBe(true);
+  });
+
+  it('keeps the explaining title when a badge is set, and drops only the badge when cleared', () => {
+    const hub = fakeHub();
+    const docks = registerHubDocks(hub, 'pangular', undefined, { capacitor: false });
+    docks?.setBadge('pangular:capacitor', { text: '2', variant: 'danger', severity: 'error' });
+    expect(hub.docks.views.get('pangular:capacitor')).toMatchObject({
+      title: 'Capacitor: no app connected (2 new, with errors)',
+      badge: '2',
+      badgeVariant: 'danger',
+    });
+    docks?.setAvailable('capacitor', true);
+    expect(hub.docks.views.get('pangular:capacitor')).toMatchObject({
+      title: 'Capacitor (2 new, with errors)',
+      badge: '2',
+    });
+    docks?.setBadge('pangular:capacitor', undefined);
+    expect(hub.docks.views.get('pangular:capacitor')?.badge).toBeUndefined();
+    expect(hub.docks.views.get('pangular:capacitor')?.title).toBe('Capacitor');
+    const updates = hub.docks.update.mock.calls.length;
+    docks?.setBadge('pangular:capacitor', undefined);
+    docks?.setBadge('pangular:unknown', { text: '1', variant: 'info' });
+    expect(hub.docks.update.mock.calls.length).toBe(updates);
+  });
+
+  it('puts the badge count into the title that labels the dock button', () => {
+    const hub = fakeHub();
+    const docks = registerHubDocks(hub, 'pangular');
+    docks?.setBadge('pangular:ngrx', { text: '3', variant: 'info' });
+    expect(hub.docks.views.get('pangular:ngrx')?.title).toBe('NgRx (3 new)');
+    docks?.setBadge('pangular:group', { text: '99+', variant: 'danger', severity: 'error' });
+    expect(hub.docks.views.get('pangular:group')?.title).toBe('Pangular (99+ new, with errors)');
+    docks?.setBadge('pangular:group', { text: '1', variant: 'danger', severity: 'warning' });
+    expect(hub.docks.views.get('pangular:group')?.title).toBe('Pangular (1 new, with warnings)');
+    docks?.setBadge('pangular:ngrx', undefined);
+    expect(hub.docks.views.get('pangular:ngrx')?.title).toBe('NgRx');
   });
 
   it('puts the All tools dock before the others, opening the panel without a view', () => {
