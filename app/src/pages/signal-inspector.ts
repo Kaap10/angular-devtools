@@ -270,7 +270,22 @@ const KIND_COLORS: Record<string, string> = {
       </div>
     }
 
-    @if (!graph() && sourceLoaded() && sourceSignals().length === 0) {
+    @if (!graph() && sourceLoaded() && loadFailed()) {
+      <div class="empty" [class.compact]="sourceSignals().length > 0" role="alert">
+        <p class="empty-title">Couldn't load signals</p>
+        <p class="hint">
+          The devtools server did not answer. Check that it is still running, then retry.
+        </p>
+        <button
+          type="button"
+          class="reset"
+          [attr.aria-disabled]="retrying() || null"
+          (click)="retry()"
+        >
+          {{ retrying() ? 'Retrying…' : 'Retry' }}
+        </button>
+      </div>
+    } @else if (!graph() && sourceLoaded() && sourceSignals().length === 0) {
       <div class="empty">
         <p class="empty-title">No signals found.</p>
         <p class="hint">
@@ -1243,6 +1258,8 @@ export class SignalInspector {
   private readonly injector = inject(Injector);
   private readonly pageId = hostPageId();
   private readonly cleanups: (() => void)[] = [];
+  /** Counts graph loads, so only the newest one applies its result. */
+  private graphLoad = 0;
   private readonly treePages = signal<
     Record<string, { roots?: LiveNode[]; reportedAt?: number; title?: string; url?: string }>
   >({});
@@ -1308,6 +1325,11 @@ export class SignalInspector {
   readonly showInternals = signal(false);
   sourceSignals = signal<SourceSignal[]>([]);
   sourceLoaded = signal(false);
+  /** The source scan or the live graph state could not be read from the server. */
+  private readonly sourceFailed = signal(false);
+  private readonly graphFailed = signal(false);
+  readonly loadFailed = computed(() => this.sourceFailed() || this.graphFailed());
+  readonly retrying = signal(false);
   filter = signal('');
   readonly resources = computed(() => this.graph()?.resources ?? []);
   private readonly internalIds = computed(
@@ -1488,10 +1510,14 @@ export class SignalInspector {
 
   async loadSignalGraph(client: DevframeRpcClient) {
     for (const cleanup of this.cleanups.splice(0)) cleanup();
+    const load = ++this.graphLoad;
+    /** A newer load (Retry, or a new client) started, so this one's outcome is dropped. */
+    const stale = () => this.destroyRef.destroyed || load !== this.graphLoad;
     const my = client.scope('pangular');
     try {
       const state = await my.rpc.sharedState('signal-graph');
-      if (this.destroyRef.destroyed) return;
+      if (stale()) return;
+      this.graphFailed.set(false);
       const apply = (value: unknown) => {
         const next = value as {
           graph?: SignalGraph | null;
@@ -1505,11 +1531,13 @@ export class SignalInspector {
       apply(state.value());
       this.cleanups.push(state.on('updated', apply));
     } catch {
+      if (stale()) return;
       this.graphState.set({ graph: null, pages: {} });
+      this.graphFailed.set(true);
     }
     try {
       const tree = await my.rpc.sharedState('component-tree');
-      if (this.destroyRef.destroyed) return;
+      if (stale()) return;
       const applyTree = (value: unknown) => {
         const pages = (value as { pages?: Record<string, { roots?: LiveNode[] }> } | null)?.pages;
         this.treePages.set(pages && typeof pages === 'object' ? pages : {});
@@ -1517,7 +1545,7 @@ export class SignalInspector {
       applyTree(tree.value());
       this.cleanups.push(tree.on('updated', applyTree));
     } catch {
-      this.treePages.set({});
+      if (!stale()) this.treePages.set({});
     }
   }
 
@@ -1577,11 +1605,35 @@ export class SignalInspector {
     try {
       const result = (await my.rpc.call('get-signals')) as SourceSignal[];
       this.sourceSignals.set(result);
+      this.sourceFailed.set(false);
     } catch {
-      // RPC not available
+      this.sourceFailed.set(true);
     } finally {
       this.sourceLoaded.set(true);
     }
+  }
+
+  /** Loads the graph and the source scan again. The alert stays until they answer, so focus
+   * stays on Retry while it is shown and moves to the filter box when the alert goes, which
+   * also happens when the graph comes back but the source scan still fails. */
+  async retry() {
+    const client = this.rpc();
+    if (!client || this.retrying()) return;
+    const trigger = document.activeElement;
+    this.retrying.set(true);
+    try {
+      await Promise.all([this.loadSignalGraph(client), this.loadSourceSignals(client)]);
+    } finally {
+      this.retrying.set(false);
+    }
+    if (this.destroyRef.destroyed) return;
+    afterNextRender(
+      () => {
+        const lost = !trigger?.isConnected || document.activeElement === document.body;
+        if (lost) this.filterInput()?.nativeElement.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   /** Clears the filters from a no-match state and keeps focus on the filter box. */
