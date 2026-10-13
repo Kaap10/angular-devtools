@@ -33,6 +33,7 @@ Of the `read` tools, the page registers two kinds. The first answer for one page
 | `screenshot-component`                                                                                     | A page tool answers with text, not an image, and the capture draws the whole component. |
 | `highlight`                                                                                                | It draws on the page and changes the selection in open panels.                          |
 | `open-in-panel`                                                                                            | It switches the panels that are open.                                                   |
+| A [server plugin's own tools](./tools.md#plugins)                                                          | Their handlers can read every page the plugin sees.                                     |
 
 The config decides the rest, as for MCP clients:
 

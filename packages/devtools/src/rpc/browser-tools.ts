@@ -99,6 +99,12 @@ const MCP_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'pangular:open-in-panel',
 ]);
 
+/**
+ * A server plugin's own tools stay MCP only: their handlers can read every
+ * page the plugin sees, so the calling page's scope can't be enforced.
+ */
+const PLUGIN_TOOL_PREFIX = 'pangular:plugin:';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -136,7 +142,7 @@ export function browserTools(host: BrowserToolHost): BrowserTool[] {
   const seen = new Set<string>();
   for (const tool of host.agent.list().tools) {
     if (!tool.id.startsWith('pangular:') || tool.safety !== 'read') continue;
-    if (MCP_ONLY_TOOLS.has(tool.id)) continue;
+    if (MCP_ONLY_TOOLS.has(tool.id) || tool.id.startsWith(PLUGIN_TOOL_PREFIX)) continue;
     const inputSchema = schemaOf(tool, host);
     if (!SOURCE_TOOLS.has(tool.id) && !pageScoped(inputSchema)) continue;
     const name = toAgentToolName(tool.id);

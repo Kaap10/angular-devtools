@@ -231,6 +231,7 @@ const config: NgmdConfig = {
         {label: 'Set up NativeScript', href: '/guides/nativescript'},
         {label: 'Set up Angular Native', href: '/guides/angular-native'},
         {label: 'Set up Capacitor', href: '/guides/capacitor', status: 'new'},
+        {label: 'Write a plugin', href: '/guides/write-a-plugin', status: 'new'},
         {label: 'Inspect, fix and verify', href: '/guides/inspect-fix-verify', status: 'new'},
       ],
     },

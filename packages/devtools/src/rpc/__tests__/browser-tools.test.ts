@@ -260,8 +260,9 @@ describe('browser tool helpers', () => {
   it('describes RPC-backed tools from their argument schemas and skips other devframes', () => {
     const host = fakeHost(async () => null);
     const names = browserTools(host).map((entry) => entry.name);
-    // `list-pages` has no page scope and reads no source, and
-    // `screenshot-component` is page scoped but MCP only.
+    // `list-pages` has no page scope and reads no source,
+    // `screenshot-component` is page scoped but MCP only, and a server
+    // plugin's own tools stay MCP only even when they take a page.
     expect(names).toEqual([
       'pangular_inspect-component',
       'pangular_get-routes',
@@ -287,6 +288,13 @@ function fakeHost(invoke: (id: string, args: unknown) => Promise<unknown>) {
       description: 'One component.',
       safety: 'read' as const,
       inputSchema: { type: 'object', properties: { selector: {}, page: {} } },
+    },
+    {
+      id: 'pangular:plugin:travel:saved',
+      kind: 'tool' as const,
+      description: 'A server plugin tool scoped to a page.',
+      safety: 'read' as const,
+      inputSchema: { type: 'object', properties: { page: {} } },
     },
     {
       id: 'pangular:navigate',

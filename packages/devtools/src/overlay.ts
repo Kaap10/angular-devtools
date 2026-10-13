@@ -9,6 +9,8 @@ import { attachHttp } from './http-overlay.ts';
 import { attachCapacitor } from './capacitor-overlay.ts';
 import { attachErrors } from './errors-collector.ts';
 import { attachLeaks } from './leaks-collector.ts';
+import { attachPlugins } from './plugins-collector.ts';
+import { attachStartup } from './startup-timing.ts';
 import { attachBrowserTools } from './browser-tools.ts';
 import { attachAxe, axeOwnerNg } from './axe-runner.ts';
 import { createRecentWrites } from './error-explain.ts';
@@ -462,6 +464,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
         on.components && cd?.push(false, true),
         forms?.push(true),
         leaks?.push(true),
+        plugins?.push(true),
         errors?.push(),
       ]),
   });
@@ -505,6 +508,14 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   const leaks = on.components
     ? attachLeaks(my, pageId, getNg, { tickMs, active: () => lease.active })
     : null;
+  const plugins = on.plugins
+    ? attachPlugins(my, pageId, getNg, {
+        config: devtoolsConfig,
+        active: () => lease.active,
+        tickMs,
+      })
+    : null;
+  const startup = on.injectors ? attachStartup(my, pageId, getNg, { tickMs }) : null;
   // Runs axe-core only when the panel or an agent asks; it loads axe-core then.
   // The component owning each element is component data: only with that inspector on.
   const axe = attachAxe(my, pageId, axeOwnerNg(on.components, getNg));
@@ -715,6 +726,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
         leaks.track();
         pushLeaks();
       }),
+    plugins && paced(() => void plugins.push().catch(() => {})),
+    startup && paced(() => void startup.push().catch(() => {})),
   ].filter((collect) => typeof collect === 'function');
   const pushAll = () => collectors.forEach((run) => run());
   pushAll();
@@ -941,6 +954,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     ngrx?.leave();
     errors?.leave();
     leaks?.leave();
+    plugins?.leave();
+    startup?.leave();
     angularInfo.leave();
     browserTools?.leave();
   };
@@ -951,6 +966,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     capacitor?.resume();
     errors?.resume();
     leaks?.resume();
+    plugins?.resume();
+    startup?.resume();
     browserTools?.resume();
     void lease.refresh();
     left = false;
@@ -972,6 +989,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     ngrx?.stop();
     errors?.stop();
     leaks?.stop();
+    plugins?.stop();
+    startup?.stop();
     browserTools?.stop();
     axe.stop();
     cd?.stop();
