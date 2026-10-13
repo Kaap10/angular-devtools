@@ -7,10 +7,10 @@ import { capped } from './router-tools.ts';
 export const HYDRATION_ROWS = 30;
 
 export const HYDRATION_DESCRIPTION =
-  'Hydration of each page that was rendered on the server, read live from what Angular records in development builds: how many component hosts were hydrated (server HTML reused), skipped (`ngSkipHydration`, rendered again on the client), mismatched (the DOM did not match the server HTML, with a diff of the server HTML Angular expected and the client DOM it found) or created on the client, and the `@defer` blocks still dehydrated (incremental hydration). Names the skipped and client-created hosts and the dehydrated blocks by instance id, at most 30 each. Says when a page was not rendered on the server, or has server HTML but no hydrated host (client hydration off, or a production build). Each open tab reports its own; `page` picks one and lists every tab without it. The answer stops at 20,000 characters.';
+  'Live SSR hydration stats (Angular dev builds): hydrated, skipped (`ngSkipHydration`), mismatched (with a diff of the server HTML Angular expected and the client DOM it found) and client-created component hosts, plus dehydrated `@defer` blocks, by instance id (up to 30 each). Says when a page was not rendered on the server or has no hydrated host. Each tab reports its own; `page` picks one. Truncated at 20,000 chars.';
 
 export const HYDRATION_OVERLAY_DESCRIPTION =
-  ' `overlay: true` outlines the regions on the page for a person watching it: hydrated (solid), skipped (dashed), mismatched (double) and dehydrated `@defer` blocks (dotted), each labelled, with a legend; `overlay: false` removes it. The overlay draws in its own layer, ignores the pointer and changes nothing in the app.';
+  ' `overlay: true|false` toggles visual outlines for hydrated (solid), skipped (dashed), mismatched (double), and dehydrated blocks (dotted).';
 
 const NO_TREE =
   'No component tree has been reported. Live data needs a page: connect through the MCP endpoint of the server that runs the app, with the app open in a browser. The stdio server has no page attached and only ever reports this.';

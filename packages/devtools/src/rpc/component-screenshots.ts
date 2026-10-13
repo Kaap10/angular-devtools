@@ -138,7 +138,7 @@ export function createComponentScreenshots(deps: Deps) {
   const tool = {
     id: 'pangular:screenshot-component',
     description:
-      'An image (PNG, or JPEG when large) of one component\'s host element as the page renders it now, returned as an MCP image content block with a short markdown note. Pass an instance id from the pangular:component-tree resource, a class name, a host tag, or a CSS selector. The page draws a copy of the element from its computed styles, so it works for parts scrolled out of view and never changes the app; it is not a pixel copy of the screen. Password fields, fields with secret-looking names or autocomplete, and elements marked `data-private`, `.sentry-mask`, `.rr-mask` or `data-pangular="mask"` are masked, and tokens in text are masked like other live values. Images from another origin without CORS, iframes and web fonts are not drawn (text uses a fallback font). Large components are scaled down to 2000 pixels on the longest side.',
+      'An image (PNG, or JPEG when large) of one component\'s host element as rendered now. Pass `selector`: an instance id, class name, host tag or CSS selector. Without `page`, ids, class names and tags are searched on every page, newest first; a CSS selector uses the newest page. The page draws a copy from computed styles, so it works off screen and never changes the app. Password and secret fields, `data-private`, `.sentry-mask`, `.rr-mask` and `data-pangular="mask"` elements, and tokens in text are masked. Cross-origin images without CORS, iframes and web fonts are not drawn. At most 2000 px.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -150,7 +150,7 @@ export function createComponentScreenshots(deps: Deps) {
         page: {
           type: 'string',
           description:
-            'Page id, when more than one tab reports (see pangular:list-pages). Searches every page without it, newest first.',
+            'Page id, when more than one tab reports (see pangular:list-pages). Without it, ids, class names and tags are searched on every page, newest first; a CSS selector uses the newest page.',
         },
         pageId: { type: 'string', description: 'Same as `page`.' },
       },
