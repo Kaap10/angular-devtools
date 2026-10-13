@@ -66,18 +66,31 @@ interface ProfilerHub {
 const hubs = new WeakMap<object, ProfilerHub>();
 
 /**
+ * The Angular major a platform without a DOM read another way, 0 when
+ * unknown. As in the browser, an unknown version leaves the profiler alone:
+ * before 20.0 taking the one slot would evict whatever profiler holds it,
+ * with no way to give it back.
+ */
+export interface ProfilerGate {
+  major: number;
+}
+
+/**
  * Adds `listener` to the one profiler this package registers with Angular, and
  * returns its remover. Returns null before Angular 20: there is a single
  * profiler slot there, and taking it would evict the Angular DevTools
- * extension with no remover to give it back.
+ * extension with no remover to give it back. In a browser the version comes
+ * from the `ng-version` attribute; a platform without a DOM passes a gate.
  */
 export function addProfilerListener(
   ng: unknown,
   listener: Profiler,
-  doc: Document = document,
+  where: Document | ProfilerGate = document,
 ): (() => void) | null {
   const setProfiler = (ng as ProfilerApi | undefined)?.ɵsetProfiler;
-  if (!ng || typeof setProfiler !== 'function' || angularMajor(doc) < 20) return null;
+  if (!ng || typeof setProfiler !== 'function') return null;
+  const gate: ProfilerGate = 'major' in where ? where : { major: angularMajor(where) };
+  if (gate.major < 20) return null;
   let hub = hubs.get(ng as object);
   if (!hub) {
     const listeners = new Set<Profiler>();

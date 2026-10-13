@@ -232,6 +232,8 @@ import {
   listPagesText,
   pageArgument,
   choosePageText,
+  nativeAppName,
+  needsDomText,
   pageDetails,
   summarizePages,
   unknownPageText,
@@ -3068,8 +3070,24 @@ const pangular = defineDevframe({
               'The agent is read-only in the devtools config (agent.readOnly), so it cannot start, stop or clear a change detection recording, or turn on the flash overlay, the Performance panel track or Angular profiling. Use the panel, then call this tool without those arguments.',
           };
         }
-        const views = cdViewsAsked(args) ? cdViewsText(args) : '';
-        if (views) {
+        // The live views draw on a DOM or into the browser's Performance panel.
+        const liveViews = 'the flash overlay, the Performance panel track and Angular profiling';
+        const reporting = [...componentPages.values()];
+        const noViews = !cdViewsAsked(args)
+          ? undefined
+          : args?.page
+            ? needsDomText(args.page, componentPages.get(args.page)?.platform, liveViews)
+            : reporting.length > 0 && reporting.every((page) => nativeAppName(page.platform))
+              ? `Every page that reports is an Angular Native or NativeScript app, which renders native views and has no DOM, so ${liveViews} need a page in a browser. pangular:list-pages lists each page's platform.`
+              : undefined;
+        // A native page skips the live views, but a `record` in the same call still runs.
+        const views = noViews
+          ? `${noViews} Recording with \`record\` works there.`
+          : cdViewsAsked(args)
+            ? cdViewsText(args)
+            : '';
+        if (noViews && args.record === undefined) return { markdown: views };
+        if (views && !noViews) {
           requestCdOptions({
             pageId: args.page,
             flash: args.flash,
@@ -3090,6 +3108,7 @@ const pangular = defineDevframe({
               : args.record === 'stop'
                 ? 'Recording stopped. The cycles recorded so far stay available.'
                 : 'Recording cleared.';
+          if (noViews) return { markdown: `${noViews}\n\n${next}` };
           return { markdown: views ? `${next}\n\n${views}` : next };
         }
         const cd = cdState.value() as CdState;
@@ -4178,6 +4197,7 @@ const pangular = defineDevframe({
       agentSees: (inspector) => config.agent.tools[inspector],
       agentAxe: !config.agent.readOnly,
       agentReadOnly: config.agent.readOnly,
+      platform: (pageId) => componentPages.get(pageId)?.platform,
       // Every page the overlay claimed, so axe works with any set of inspectors on.
       pages: () =>
         withPageUrls([

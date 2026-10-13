@@ -16,7 +16,13 @@ import { elementById } from './element-id.ts';
 import { setRedaction } from './forms-privacy.ts';
 import { hostBySelector } from './host-tree.ts';
 import { collectInjectorTree } from './injector-tree.ts';
+import {
+  applicationErrorsTarget,
+  attachNativeDiagnostics,
+  nativeDebugApi,
+} from './native-diagnostics.ts';
 import { attachNgrx } from './ngrx-overlay.ts';
+import { installReduxDevtoolsHook, uninstallReduxDevtoolsHook } from './redux-devtools-hook.ts';
 import { HIGHLIGHT_SAFETY_MS } from './page-highlight.ts';
 import { attachPipes } from './pipes-collector.ts';
 import type { NgDebugApi } from './pipes-runtime.ts';
@@ -72,6 +78,8 @@ export function initNativeScriptOverlay(options: NativeScriptOverlayOptions = {}
   const baseURL = options.baseURL ?? defaultDevtoolsBaseURL();
   gateInjectorProfiler();
   installWebShims(baseURL);
+  // Before the app starts, so stores that look for the Redux DevTools extension find the stand-in.
+  installReduxDevtoolsHook();
 
   if (typeof WebSocket === 'undefined') {
     console.warn(
@@ -200,6 +208,15 @@ async function startSession(
   const title = `NativeScript (${isAndroid ? 'Android' : 'iOS'})`;
 
   const tree = nativeScriptTree(angularDebugApi, () => Application.getRootView() as NativeView);
+  if (!on.ngrx) uninstallReduxDevtoolsHook();
+  const diagnostics = attachNativeDiagnostics(my, pageId, {
+    getNg: angularDebugApi,
+    tree,
+    config,
+    tickMs: () => tickMs,
+    describe: () => ({ url: '/', title }),
+    errorTarget: applicationErrorsTarget(Application),
+  });
 
   const pingKnows = async (name: string) => {
     const answer = (await my.rpc.call(name, pageId)) as { known?: boolean } | undefined;
@@ -229,6 +246,7 @@ async function startSession(
       treeSentAt = Date.now();
       if (await pingKnows('ping-component-tree')) return;
     }
+    if (json !== lastTreeJson) diagnostics.treeChanged();
     lastTreeJson = json;
     treeSentAt = Date.now();
     try {
@@ -244,8 +262,10 @@ async function startSession(
     (value, name) => serializeNamed(name, value, { budget: 1000 }),
     Date.now,
     (value, name) => graphValue(name, value),
+    { onChange: diagnostics.onSignalChange },
   );
   const restoreSignalHook = on.signals ? await installSignalWriteHook(signalHistory.onWrite) : null;
+  if (restoreSignalHook) diagnostics.signalHookReady();
 
   let signalTarget: SignalTarget = null;
   let lastSignalKey = '';
@@ -340,6 +360,7 @@ async function startSession(
     on.injectors && pushInjectorTree,
     ngrx && (() => ngrx.push()),
     pipes && (async () => pipes.push()),
+    ...diagnostics.collectors,
   ].filter((collect) => typeof collect === 'function');
   const report = async () => {
     for (const collect of collectors) {
@@ -410,6 +431,7 @@ async function startSession(
     restoreSignalHook?.();
     ngrx?.stop();
     pipes?.stop();
+    diagnostics.stop();
     if (!forget) {
       rpc.close?.();
       return;
@@ -421,6 +443,7 @@ async function startSession(
       on.ngrx && 'forget-ngrx-page',
       on.pipes && 'forget-pipes-page',
     ].filter((name): name is string => typeof name === 'string');
+    diagnostics.leave();
     void Promise.allSettled(pages.map((name) => my.rpc.call(name, pageId))).finally(() =>
       rpc.close?.(),
     );
@@ -428,26 +451,7 @@ async function startSession(
 }
 
 function angularDebugApi(): DebugNg | undefined {
-  const ng = (globalThis as { ng?: DebugNg }).ng;
-  if (typeof ng?.getComponent !== 'function') return undefined;
-  const getDirectives = ng.getDirectives;
-  if (!getDirectives) return ng;
-  return { ...ng, getDirectives: (host) => withTextGlobal(() => getDirectives(host)) };
-}
-
-/**
- * Angular's `getDirectives()` starts with `node instanceof Text`, a DOM global
- * a NativeScript runtime lacks, so a stand-in exists for the length of the call.
- */
-function withTextGlobal<T>(fn: () => T): T {
-  const g = globalThis as Record<string, unknown>;
-  if ('Text' in g) return fn();
-  g['Text'] = class Text {};
-  try {
-    return fn();
-  } finally {
-    delete g['Text'];
-  }
+  return nativeDebugApi<DebugNg>();
 }
 
 let flashed: {
