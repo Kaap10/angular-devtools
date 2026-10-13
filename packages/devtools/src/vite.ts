@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { isAuthTokens, type PangularAuthTokens } from './auth-tokens.ts';
 import type { Plugin } from 'vite';
 import { normalizeHubBase } from '@devframes/hub/constants';
@@ -22,6 +23,7 @@ import {
 } from './hub-gate.ts';
 import { pickPangularConfig, resolvePangularConfig, type PangularConfig } from './config.ts';
 import { overlayTags } from './vite-overlay.ts';
+import { signalPrimitivesAlias } from './vite-signals-stub.ts';
 import { terminalsEnabled } from './hub-terminals.ts';
 
 export type { PangularConfig } from './config.ts';
@@ -123,6 +125,11 @@ export default function pangularVite(options: PangularViteOptions = {}): Plugin 
     name: 'pangular',
     apply: 'serve',
     enforce: 'pre',
+    config(user) {
+      // Vite allows a relative `root`, and `createRequire` needs an absolute path.
+      const alias = signalPrimitivesAlias(resolve(process.cwd(), user.root ?? ''));
+      return alias.length ? { resolve: { alias } } : undefined;
+    },
     // `pre`, so Vite's own HTML pass resolves the injected import like any other.
     transformIndexHtml: {
       order: 'pre',
