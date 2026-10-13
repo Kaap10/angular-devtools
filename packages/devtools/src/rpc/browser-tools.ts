@@ -90,13 +90,16 @@ const SOURCE_TOOLS: ReadonlySet<string> = new Set([
 /**
  * Page scoped tools that stay MCP only: `screenshot-component` cannot hand
  * the image back through a page tool and runs a full capture, `highlight`
- * draws on the page and changes the selection in open panels, and
- * `open-in-panel` switches open panels.
+ * draws on the page and changes the selection in open panels,
+ * `open-in-panel` switches open panels, and the NgRx session export and
+ * import move whole recorded sessions in and out of the server.
  */
 const MCP_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'pangular:screenshot-component',
   'pangular:highlight',
   'pangular:open-in-panel',
+  'pangular:export-ngrx-session',
+  'pangular:import-ngrx-session',
 ]);
 
 /**

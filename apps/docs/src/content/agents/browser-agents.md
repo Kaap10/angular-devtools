@@ -33,7 +33,10 @@ Of the `read` tools, the page registers two kinds. The first answer for one page
 | `screenshot-component`                                                                                     | A page tool answers with text, not an image, and the capture draws the whole component. |
 | `highlight`                                                                                                | It draws on the page and changes the selection in open panels.                          |
 | `open-in-panel`                                                                                            | It switches the panels that are open.                                                   |
+| `export-ngrx-session`, `import-ngrx-session`                                                               | They move whole recorded NgRx sessions out of and into the server.                      |
 | A [server plugin's own tools](./tools.md#plugins)                                                          | Their handlers can read every page the plugin sees.                                     |
+
+On the page, `inspect-ngrx-entry` and `generate-ngrx-test` read the live page only: they refuse `session`, because imported sessions are kept for the whole server.
 
 The config decides the rest, as for MCP clients:
 
@@ -41,7 +44,7 @@ The config decides the rest, as for MCP clients:
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
 | `inspectors.<name>`  | An inspector that is off has no tools on the page.                                                      |
 | `agent.tools.<name>` | `false` leaves that inspector's tools off the page.                                                     |
-| `agent.readOnly`     | `change-detection` and `hydration` join as `read` tools, without the arguments that act.                |
+| `agent.readOnly`     | `change-detection`, `hydration` and `audit` join as `read` tools, without the arguments that act.       |
 | `agent.browserTools` | Off by default: nothing is registered on the page. `true` turns it on. The MCP server keeps every tool. |
 
 See [Configuration](../getting-started/configuration.md#inspectors-and-agent-tools).

@@ -247,12 +247,14 @@ The server registers tools with a colon, as `pangular:get-routes`. MCP clients s
 
 ### Read and action tools
 
-Each tool has a safety tier: `read`, `action` or `destructive`. The server marks `read` tools as read-only for your client, and `destructive` tools as destructive. Eighteen tools act on the app, so the server does not mark them read-only:
+Each tool has a safety tier: `read`, `action` or `destructive`. The server marks `read` tools as read-only for your client, and `destructive` tools as destructive. Twenty tools act on the app, so the server does not mark them read-only:
 
 | Tool                     | Tier          | Reference                                                                     |
 | ------------------------ | ------------- | ----------------------------------------------------------------------------- |
 | `navigate`               | `action`      | [Act on the router](./tools.md#act-on-the-router)                             |
 | `dispatch-ngrx-action`   | `action`      | [Dispatch an action](./tools.md#dispatch-an-action)                           |
+| `restore-ngrx-state`     | `action`      | [Restore a state](./tools.md#restore-a-state)                                 |
+| `query-action`           | `action`      | [Invalidate or refetch a query](./tools.md#invalidate-or-refetch-a-query)     |
 | `form-action`            | `action`      | [Act on a form](./tools.md#act-on-a-form)                                     |
 | `fill-form`              | `action`      | [Act on a form](./tools.md#act-on-a-form)                                     |
 | `set-http-rule`          | `action`      | [Fault rules](./tools.md#fault-rules)                                         |

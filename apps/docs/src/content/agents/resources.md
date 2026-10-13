@@ -96,6 +96,8 @@ This table covers the data that has no resource of its own.
 | `pangular:pipe-usage`       | Live pipe instances and recorded calls                                                                    |
 | `pangular:errors`           | Error groups and console calls, by page id                                                                |
 | `pangular:leaks`            | Leak hints: retained instances, open subscriptions, effects, by page id                                   |
+| `pangular:redux-stores`     | NGXS, Elf, MiniRx and other Redux DevTools stores and their actions, by page id                           |
+| `pangular:tanstack-query`   | TanStack Query clients, queries and mutations, by page id                                                 |
 | `pangular:startup`          | Startup timing: milestones and the slowest providers, by page id                                          |
 | `pangular:plugins`          | Plugin views by page id, and the server plugins with their tools. Hidden while any plugin's tools are off |
 | `pangular:plugin.<id>`      | A server plugin's own state, hidden with that plugin's tools                                              |
