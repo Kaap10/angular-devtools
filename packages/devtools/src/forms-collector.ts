@@ -40,6 +40,9 @@ import { fieldPath, probeEveryTime } from './forms-read.ts';
 import { watchWebMcp } from './forms-webmcp.ts';
 import { FORMLESS_FORM_ACTIONS } from './config.ts';
 import { tapConsole } from './console-tap.ts';
+import { createDeltaChannel } from './delta-channel.ts';
+import { FORMS_SHAPE } from './push-delta.ts';
+import { LEASED_PUSH_MS } from './page-lease.ts';
 
 type AnyRecord = Record<string, any>;
 
@@ -112,8 +115,28 @@ function afterPaint(fn: () => void) {
 }
 
 export interface FormsCollector {
-  push(): void;
+  /**
+   * Reads the forms and sends what changed at once; `wake` sends even when the
+   * page is idle.
+   */
+  push(wake?: boolean): Promise<void>;
+  /**
+   * Reads the forms and sends what changed, at most once a second (`LEASED_PUSH_MS`)
+   * with the reports in between batched into the next one, so no event is lost.
+   */
+  sync(): Promise<void>;
+  /** The page left: the next report goes in full, such as after the back/forward cache. */
+  leave(): void;
   stop(): void;
+}
+
+export interface FormsOptions {
+  /**
+   * Whether a panel or an agent watches (`page-lease.ts`). An idle page still
+   * reads its forms, so the timeline misses nothing, but only keeps itself
+   * alive on the server.
+   */
+  active?: () => boolean;
 }
 
 export function attachForms(
@@ -122,7 +145,16 @@ export function attachForms(
   getNg: () => any,
   highlight: { show(el: HTMLElement): void; clear(): void },
   maxEvents = MAX_FORM_EVENTS,
+  options: FormsOptions = {},
 ): FormsCollector {
+  const channel = createDeltaChannel({
+    call: (name, ...args) => my.rpc.call(name, ...args),
+    pageId,
+    push: 'push-forms',
+    ping: 'ping-forms',
+    shape: FORMS_SHAPE,
+    keepaliveMs: HEARTBEAT_MS,
+  });
   const assignIds = createFormIds(pageId);
   let ids = new WeakMap<object, string>();
   const idOf = (root: object) => ids.get(root) ?? `form@${pageId}`;
@@ -160,8 +192,6 @@ export function attachForms(
   };
   let lastForms: CollectedForm[] = [];
   let lastRoots = new Map<string, object>();
-  let lastPayload = '';
-  let lastPushAt = 0;
   const formEvents: FormEvent[] = [];
   let droppedEvents = 0;
   const watched = new Map<object, { formId: string; stop: () => void }>();
@@ -179,6 +209,10 @@ export function attachForms(
   let devtoolsSincePush = false;
   let userTimer: ReturnType<typeof setTimeout> | undefined;
   let pushTimer: ReturnType<typeof setTimeout> | undefined;
+  // Sends are paced like the other leased reports; reads go on, so the timeline misses nothing.
+  let sentAt = -Infinity;
+  let sendTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingReport: Record<string, unknown> | null = null;
   let submittingForm: string | null = null;
   let instrumentation: Instrumentation | null = null;
   let renders: RenderCounter | null = null;
@@ -389,7 +423,28 @@ export function attachForms(
     for (const child of node.children ?? []) stampPending(formId, child, now);
   }
 
-  async function pushForms() {
+  /** Sends `report` now, or once a second has passed since the last send when `paced`. */
+  async function deliver(report: Record<string, unknown>, paced: boolean) {
+    const wait = sentAt + LEASED_PUSH_MS - Date.now();
+    if (paced && wait > 0) {
+      pendingReport = report;
+      sendTimer ??= setTimeout(() => {
+        sendTimer = undefined;
+        const next = pendingReport;
+        pendingReport = null;
+        // A page that went idle meanwhile only keeps itself alive, on its next read.
+        if (next && (!options.active || options.active())) void deliver(next, false);
+      }, wait);
+      return;
+    }
+    clearTimeout(sendTimer);
+    sendTimer = undefined;
+    pendingReport = null;
+    sentAt = Date.now();
+    await channel.send(report);
+  }
+
+  async function pushForms(wake = false, paced = false) {
     try {
       const ng = getNg();
       if (!ng?.getDirectives) return;
@@ -462,11 +517,8 @@ export function attachForms(
         instrumented: !!instrumentation,
         ...(droppedEvents ? { dropped: droppedEvents } : {}),
       };
-      const payload = JSON.stringify(report);
-      if (payload === lastPayload && now - lastPushAt < HEARTBEAT_MS) return;
-      lastPayload = payload;
-      lastPushAt = now;
-      await my.rpc.call('push-forms', report);
+      if (!wake && options.active && !options.active()) await channel.keepalive(() => report);
+      else await deliver(report, paced && !wake);
     } catch {
       return;
     }
@@ -476,7 +528,7 @@ export function attachForms(
     if (pushTimer) return;
     pushTimer = setTimeout(() => {
       pushTimer = undefined;
-      void pushForms();
+      void pushForms(false, true);
     }, PUSH_DELAY_MS);
   }
 
@@ -745,12 +797,22 @@ export function attachForms(
   });
 
   return {
-    push: () => void pushForms(),
+    push: (wake = false) => pushForms(wake),
+    sync: () => pushForms(false, true),
+    leave() {
+      clearTimeout(pushTimer);
+      pushTimer = undefined;
+      clearTimeout(sendTimer);
+      sendTimer = undefined;
+      pendingReport = null;
+      channel.resync();
+    },
     stop() {
       observer?.disconnect();
       webMcp.stop();
       probeEveryTime(false);
       clearTimeout(pushTimer);
+      clearTimeout(sendTimer);
       clearTimeout(userTimer);
       for (const type of USER_EVENTS) document.removeEventListener(type, onUserEvent, true);
       removeEventListener('unhandledrejection', onRejection);
