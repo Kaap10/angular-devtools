@@ -9,6 +9,7 @@ import { attachHttp } from './http-overlay.ts';
 import { attachCapacitor } from './capacitor-overlay.ts';
 import { attachErrors } from './errors-collector.ts';
 import { attachLeaks } from './leaks-collector.ts';
+import { attachBrowserTools } from './browser-tools.ts';
 import { attachAxe, axeOwnerNg } from './axe-runner.ts';
 import { createRecentWrites } from './error-explain.ts';
 import { allowClientRules, httpRegistry } from './http-rules.ts';
@@ -55,6 +56,7 @@ import {
 import { startComponentPick } from './component-pick.ts';
 import { registerComponentEdit } from './component-edit-overlay.ts';
 import { registerComponentValues } from './component-values-overlay.ts';
+import type { ScreenshotRequest } from './component-screenshot.ts';
 import { installSourceHelpers } from './component-source.ts';
 import { createDeferTracker } from './defer-blocks.ts';
 import { attachHydrationOverlay } from './hydration-overlay.ts';
@@ -460,6 +462,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
         on.components && cd?.push(false, true),
         forms?.push(true),
         leaks?.push(true),
+        errors?.push(),
       ]),
   });
   own(lease.stop);
@@ -493,7 +496,11 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     : null;
   const ngrx = on.ngrx ? attachNgrx(my, pageId, getNg, limits.changeLog) : null;
   const errors = on.errors
-    ? attachErrors(my, pageId, getNg, { tickMs, writes: recentWrites })
+    ? attachErrors(my, pageId, getNg, {
+        tickMs,
+        writes: recentWrites,
+        active: () => lease.active,
+      })
     : null;
   const leaks = on.components
     ? attachLeaks(my, pageId, getNg, { tickMs, active: () => lease.active })
@@ -502,6 +509,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   // The component owning each element is component data: only with that inspector on.
   const axe = attachAxe(my, pageId, axeOwnerNg(on.components, getNg));
   const angularInfo = attachAngularInfo(my, pageId, getNg, { tickMs });
+  const browserTools = devtoolsConfig.agent.browserTools ? attachBrowserTools(my, pageId) : null;
   const consoleGlobals = attachConsoleGlobals(my, pageId, {
     getNg,
     inspectors: on,
@@ -882,6 +890,17 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       allowed: devtoolsConfig.actions.components,
       edited: () => void pushTree(true).catch(() => {}),
     });
+    // Loaded on the first capture, so pages that never take one don't pay for it.
+    my.rpc.register({
+      name: 'component-screenshot',
+      type: 'event',
+      jsonSerializable: true,
+      handler: (message: ScreenshotRequest | null) =>
+        void import('./component-screenshot.ts')
+          .then((screenshot) => screenshot.answerScreenshotRequest(my.rpc, pageId, message))
+          // A chunk that fails to load leaves the request to time out on the server.
+          .catch(() => {}),
+    });
 
     const componentOf = (el: unknown) => {
       const host = el instanceof Element ? componentHostOf(getNg(), el) : null;
@@ -923,6 +942,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     errors?.leave();
     leaks?.leave();
     angularInfo.leave();
+    browserTools?.leave();
   };
   addEventListener('pagehide', leave);
   const resendConfig = () => {
@@ -931,6 +951,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     capacitor?.resume();
     errors?.resume();
     leaks?.resume();
+    browserTools?.resume();
     void lease.refresh();
     left = false;
     onVisibility();
@@ -951,6 +972,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     ngrx?.stop();
     errors?.stop();
     leaks?.stop();
+    browserTools?.stop();
     axe.stop();
     cd?.stop();
     hydrationOverlay?.stop();

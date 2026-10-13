@@ -263,9 +263,11 @@ describe('agent tool and RPC registration', () => {
         'navigate',
         'record-pipes',
         'remove-http-rule',
+        'remove-ssr-override',
         'set-component-property',
         'set-http-rule',
         'set-signal',
+        'set-ssr-override',
         'track-subscriptions',
         'watch-signal',
       ].sort(),
@@ -372,9 +374,11 @@ describe('agent tool and RPC registration', () => {
         'navigate',
         'record-pipes',
         'remove-http-rule',
+        'remove-ssr-override',
         'set-component-property',
         'set-http-rule',
         'set-signal',
+        'set-ssr-override',
         'track-subscriptions',
         'watch-signal',
       ].sort(),
@@ -393,7 +397,12 @@ describe('agent tool and RPC registration', () => {
     const http = await boot({ actions: { http: false } });
     expect(http.actionTools).not.toContain('set-http-rule');
     expect(http.actionTools).not.toContain('remove-http-rule');
+    expect(http.actionTools).not.toContain('set-ssr-override');
+    expect(http.actionTools).not.toContain('remove-ssr-override');
     expect(http.tools).toContain('list-http-rules');
+    expect(http.tools).toEqual(
+      expect.arrayContaining(['list-ssr-overrides', 'inspect-transfer-state']),
+    );
     const components = await boot({ actions: { components: false } });
     expect(components.actionTools).not.toContain('set-component-property');
     expect(components.actionTools).not.toContain('set-signal');
