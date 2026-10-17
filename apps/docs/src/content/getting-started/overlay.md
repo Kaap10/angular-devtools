@@ -64,10 +64,14 @@ The overlay reads `window.ng`, Angular's debug API. Production builds remove it,
 
 ### Where it looks
 
-The overlay looks for the devframe connection next to the page first. Then it tries these paths in order:
+The overlay looks for the devframe connection under these paths, in order, and uses the first one that answers:
 
-1. `/__pangular/`
-2. `/__devframes/pangular/`
+1. `/__devframes/pangular/`, where the Express hub and the Vite plugin serve it
+2. `/__pangular/`, the path `pangular dev` is proxied to
+3. Next to the page
+4. `/__devframe/`
+
+The browser logs each path that doesn't answer as a failed request, so the Express hub and the Vite plugin come first and connect without one.
 
 It also adds the [floating button](./popup-and-hub.md). With the hub mounted, the button opens the whole hub, with every dock in a side rail.
 
@@ -80,6 +84,12 @@ Each read skips data that did not change. Router events are sent as they happen.
 ### One id per tab
 
 Each browser tab gets its own page id, kept in `sessionStorage`. The devtools use it to tell tabs apart. When a tab closes, its data is dropped.
+
+### Server restarts
+
+If the dev server stops, the overlay stops sending and connects again once the server is back, without a page reload. It tries after half a second, then waits longer between attempts, up to 5 seconds. Each attempt reads the connection file again, so a server that comes back on another WebSocket port is found. Once connected, it claims the same page id and sends every report again in full. What the page recorded meanwhile, such as the forms timeline and the router navigations, stays on the page and goes out with it.
+
+The overlay keeps the token it got for the one-time code, and the server keeps its tokens across restarts, so the page is trusted again without the code. If the server refuses the token, the overlay logs one warning and stops. Reload the page to enter a new code.
 
 ## A custom mount path
 
@@ -246,7 +256,7 @@ See [Restore NgRx signal state](../guides/ngrx-signals-restore.md).
 
 ## No devtools server found
 
-If no path answers, the overlay logs an error that starts with `[pangular] No devtools server found` and lists the paths it tried. Without a `baseURL`, it tries next to the page, then `/__pangular/`, `/__devframes/pangular/` and `/__devframe/`. The floating button still appears, and its panel says **No devtools server found** with a **Try again** button and a link to the setup guide.
+If no path answers, the overlay logs an error that starts with `[pangular] No devtools server found` and lists the paths it tried. Without a `baseURL`, it tries `/__devframes/pangular/`, `/__pangular/`, the path next to the page and `/__devframe/`. The floating button still appears, and its panel says **No devtools server found** with a **Try again** button and a link to the setup guide.
 
 Common causes:
 
@@ -275,7 +285,7 @@ While you pick an element on the page, the box follows the pointer and clears wh
     No. The overlay adds the floating button itself. See <a href="./popup-and-hub.md">Popup and hub</a>.
   </ngmd-accordion-item>
   <ngmd-accordion-item title="Does it slow down my app?">
-    It reads the page after change detection, at most once every 250 ms, plus a heartbeat every 4 seconds. It sends an inspector's data only when it changed. The HTTP inspector sends only the calls made since its last report. When the data of the components, signals, injectors, router or HTTP inspector stays the same for 5 to 8 seconds, the page sends a short ping instead, so the server keeps the page. With the dynamic import above, it never loads in production builds.
+    It reads the page after change detection, at most once every 250 ms, plus a heartbeat every 4 seconds. It sends an inspector's data only when it changed. The HTTP inspector sends only the calls made since its last report. While nothing changes, the page sends only a small heartbeat every 10 seconds, which keeps all of its data on the server. With the dynamic import above, it never loads in production builds.
   </ngmd-accordion-item>
   <ngmd-accordion-item title="Which values leave the page?">
     Live values are sent to the devtools server. Secret-looking values are redacted first. See <a href="../security.md">Access and redaction</a>.

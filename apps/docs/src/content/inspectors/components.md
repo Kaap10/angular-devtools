@@ -291,7 +291,7 @@ A notice at the top says why you see the source list: no page is connected, or t
 
 <ngmd-card-grid columns="2">
   <ngmd-card icon="zap" title="Live page">
-    The overlay walks the page with Angular's debug API after change detection. It doesn't resend an unchanged tree. After 8 seconds without a change, it sends a short ping so the server keeps the page.
+    The overlay walks the page with Angular's debug API after change detection. It doesn't resend an unchanged tree. A small heartbeat every 10 seconds keeps the page on the server.
   </ngmd-card>
   <ngmd-card icon="file" title="Source scan">
     The server scans your files for <code>&#64;Component</code> and <code>&#64;Directive</code> classes. It also supplies the file and line in the detail header.
@@ -317,7 +317,7 @@ The live tree reads `window.ng`, which only development builds expose. It uses t
 
 ### Refresh rate
 
-On Angular 20 and later, the page reads the tree about 250 ms after Angular runs change detection, and every 4 seconds as a heartbeat. Until the app bootstraps, it reads the tree every 3 seconds. It also reads it at once when you select an instance. It reads the detail block only for the selected instance. The server drops a page after 15 seconds without a report, unless its tab is in the background. See [Tabs in the background](../getting-started/popup-and-hub.md#tabs-in-the-background).
+On Angular 20 and later, the page reads the tree about 250 ms after Angular runs change detection, and every 4 seconds as a heartbeat. Until the app bootstraps, it reads the tree every 3 seconds. It also reads it at once when you select an instance. It reads the detail block only for the selected instance. The server drops a page after 15 seconds without a report or a heartbeat, unless its tab is in the background. See [Tabs in the background](../getting-started/popup-and-hub.md#tabs-in-the-background).
 
 ## How to use it
 
@@ -501,7 +501,7 @@ The page sends the first level of each input and property, with 30 keys or items
 
 ### Secrets are redacted
 
-The devtools replace inputs and properties with secret-looking names with `[redacted]`. They also redact JWTs and `Bearer` values inside strings. See [what the devtools redact](../security.md).
+The devtools replace inputs and properties with secret-looking names with `[redacted]`. They also redact JWTs and `Bearer` values inside strings. The value of a form field in the component's template that the [Forms](./forms.md) tab masks by its element, such as a password field or one marked `data-pangular="mask"`, shows as `[redacted]` too, in the `FormGroup` or `ngModel` model that holds it. See [what the devtools redact](../security.md#components-signals-ngrx-and-pipes).
 
 ### Selected components stay in memory
 

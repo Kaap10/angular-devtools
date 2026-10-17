@@ -1,4 +1,5 @@
 import { redactCredentials } from './credential-redact.ts';
+import { RedactionScope } from './redaction-scope.ts';
 
 export const REDACTED = '[redacted]';
 
@@ -130,6 +131,16 @@ interface PrivacyConfig {
   unmask?: string[];
 }
 
+const scope = new RedactionScope<PrivacyConfig, RedactReason | null>();
+
+/**
+ * A number that changes whenever a value redacted inside the current
+ * `withRedactionScope` could come out differently, or null outside a scope.
+ */
+export function redactionEpoch(): number | null {
+  return scope.epoch();
+}
+
 let secretNames: string[] = [];
 let unmaskNames: string[] = [];
 
@@ -139,6 +150,8 @@ export function setRedaction(options: { secretNames?: string[]; unmask?: string[
     .map((name) => wordsOf(name).map(singular).join(''))
     .filter(Boolean);
   unmaskNames = [...(options.unmask ?? [])];
+  secretKeys.clear();
+  scope.changed();
 }
 
 function pageConfig(): PrivacyConfig {
@@ -151,6 +164,8 @@ function pageConfig(): PrivacyConfig {
 }
 
 function config(): PrivacyConfig {
+  const pinned = scope.config();
+  if (pinned) return pinned;
   const page = pageConfig();
   if (!unmaskNames.length) return page;
   return { ...page, unmask: [...(Array.isArray(page.unmask) ? page.unmask : []), ...unmaskNames] };
@@ -180,7 +195,29 @@ function containsName(words: string[], name: string): boolean {
   return false;
 }
 
+/** `isSecretKey` per key: it depends only on the key and `secretNames`, so `setRedaction` clears it. */
+const secretKeys = new Map<string, boolean>();
+const MAX_CACHED_KEYS = 20_000;
+
 export function isSecretKey(key: string): boolean {
+  let secret = secretKeys.get(key);
+  if (secret === undefined) {
+    secret = classify(key);
+    if (secretKeys.size >= MAX_CACHED_KEYS) secretKeys.clear();
+    secretKeys.set(key, secret);
+  }
+  return secret;
+}
+
+let classified = 0;
+
+/** How many keys `isSecretKey` has classified (not answered from its cache), for the hot-path tests. */
+export function secretKeyClassifications(): number {
+  return classified;
+}
+
+function classify(key: string): boolean {
+  classified++;
   const words = wordsOf(key).map(singular);
   if (words.some((word) => SECRET_WORDS.has(word))) return true;
   if (SECRET_PAIRS.has(words.join(''))) return true;
@@ -195,7 +232,25 @@ export function isSecretKey(key: string): boolean {
  * `redaction.secretNames`, and the `mask` and `unmask` lists.
  */
 export function isRedactedKey(key: string): boolean {
-  return redactReason(key) !== null;
+  return scope.keyReason(key, () => redactReason(key)) !== null;
+}
+
+/**
+ * Runs `body` with the redaction config read once: the page's
+ * `__PANGULAR_FORMS__` lists and `redaction.unmask` are read at the start, and
+ * each key's `isRedactedKey` answer is kept until that config changes. Use it
+ * around a whole collect or store update; nested calls join the outer one.
+ */
+export function withRedactionScope<T>(body: () => T): T {
+  return scope.run(() => {
+    // Each list is read once (it may be a getter) and copied, so the scope sees one config.
+    const { mask, unmask } = pageConfig();
+    const own = Array.isArray(unmask) ? [...unmask] : unmask;
+    return {
+      mask: Array.isArray(mask) ? [...mask] : mask,
+      unmask: unmaskNames.length ? [...(Array.isArray(own) ? own : []), ...unmaskNames] : own,
+    };
+  }, body);
 }
 
 function listed(list: string[] | undefined, key: string): boolean {
@@ -233,17 +288,70 @@ function safeQuery(element: Element, selector: string): boolean {
 }
 
 export function redactMessage(text: string, secrets: Iterable<string> = []): string {
-  let out = redactCredentials(text, REDACTED)
-    .replace(JWT, REDACTED)
-    .replace(BEARER, `Bearer ${REDACTED}`);
-  const longestFirst = [...secrets].filter((secret) => secret.length >= 3);
-  longestFirst.sort((a, b) => b.length - a.length);
-  for (const secret of longestFirst) out = out.split(secret).join(REDACTED);
+  return redactMessageWith(text, longestFirst(secrets));
+}
+
+/** `secrets` as `redactMessageWith` takes them: 3 characters or more, longest first. */
+export function longestFirst(secrets: Iterable<string>): string[] {
+  const out = [...secrets].filter((secret) => secret.length >= 3);
+  out.sort((a, b) => b.length - a.length);
   return out;
 }
 
+/** `redactMessage` with secrets `longestFirst` already prepared, for many texts in a row. */
+export function redactMessageWith(text: string, ordered: readonly string[]): string {
+  let out = redactCredentials(text, REDACTED)
+    .replace(JWT, REDACTED)
+    .replace(BEARER, `Bearer ${REDACTED}`);
+  for (const secret of ordered) out = out.split(secret).join(REDACTED);
+  return out;
+}
+
+/** Most earlier secret values a `SecretSet` keeps hiding after they changed. */
+export const MAX_RETIRED_SECRETS = 50;
+
+/**
+ * Whether `value` is one of `values` or the start of one, as a field's value
+ * is while someone keeps typing.
+ */
+export function startsAnyOf(value: string, values: Iterable<string>): boolean {
+  for (const other of values) if (other.startsWith(value)) return true;
+  return false;
+}
+
+/**
+ * The secret values of one form, to hide them in its harmless fields and messages.
+ * Built again on every collection from `previous`, so a value a secret field held
+ * a moment ago (the old password a `confirmation` field still repeats) stays
+ * hidden: up to `MAX_RETIRED_SECRETS` earlier values, newest kept.
+ *
+ * A value is kept only once no value of the form starts with it any more: the
+ * field moved on to something else. While someone types `Secret123`, the collections see `Sec`,
+ * `Secr` and so on; those are the start of the next value, not values the
+ * field left, and hiding them would mask `Section` or `Security` everywhere.
+ */
 export class SecretSet {
   private readonly values = new Set<string>();
+  private readonly retired = new Set<string>();
+  /** The previous collection's values, kept unless a value of this one starts with them. */
+  private readonly previous: readonly string[];
+
+  constructor(previous?: SecretSet) {
+    this.previous = previous ? [...previous.values] : [];
+    if (!previous) return;
+    for (const value of previous.earlier()) this.retired.add(value);
+  }
+
+  /** The earlier values this set hides, oldest first, at most `MAX_RETIRED_SECRETS`. */
+  private earlier(): string[] {
+    const out = new Set(this.retired);
+    for (const value of this.previous) {
+      if (startsAnyOf(value, this.values)) continue;
+      out.delete(value);
+      out.add(value);
+    }
+    return [...out].slice(-MAX_RETIRED_SECRETS);
+  }
 
   add(value: unknown) {
     if (typeof value === 'string' && value.length >= 3) this.values.add(value);
@@ -254,7 +362,12 @@ export class SecretSet {
     return this.values.size;
   }
 
+  /** The values this set hides, current and earlier. */
+  all(): string[] {
+    return [...new Set([...this.values, ...this.earlier()])];
+  }
+
   redact(text: string): string {
-    return redactMessage(text, this.values);
+    return redactMessage(text, this.all());
   }
 }

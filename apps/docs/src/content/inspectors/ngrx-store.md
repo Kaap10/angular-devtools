@@ -291,7 +291,7 @@ Use `provideStore()` or `StoreModule.forRoot()`. The overlay stops looking after
 
 ### Redaction
 
-The devtools replace state keys with secret-looking names with `[redacted]`, at any depth. See [what the devtools redact](../security.md).
+The devtools replace state keys with secret-looking names with `[redacted]`, at any depth. A signal store method call that writes such a key shows every argument as `[redacted]` in the change log, and so do later calls of that method. An argument whose parameter name looks secret, such as `password` in `login(email, password)`, is masked too. See [what the devtools redact](../security.md#components-signals-ngrx-and-pipes).
 
 ### Action origin
 

@@ -41,7 +41,7 @@ import { lintPipes, lintPipesText } from './rpc/pipe-lint.ts';
 import { cachedPipeLint } from './rpc/pipe-lint-cache.ts';
 import { templateLintTool } from './rpc/template-lint-tool.ts';
 import { explainPipeOnPage, pipeRecordRequest, pipeRecordText } from './rpc/pipes-agent.ts';
-import { createPageOwners } from './rpc/page-owners.ts';
+import { createPageOwners, type OwnerBroadcast } from './rpc/page-owners.ts';
 import { trackPageSessions } from './rpc/page-sessions.ts';
 import { getBuildMeta } from './rpc/build-meta.ts';
 import { createOpenInEditor, defaultLauncher } from './rpc/open-in-editor.ts';
@@ -223,6 +223,7 @@ import type { HttpPage, HttpPayloadState, HttpReport, HttpState } from './types.
 
 import { analogPages, nameServerFns, registerAnalog } from './rpc/analog-register.ts';
 import { clearCalls } from './analog-server-log.ts';
+import { createPageHeartbeats } from './rpc/page-heartbeats.ts';
 import { createPageVisibility } from './rpc/page-ttl.ts';
 import {
   createAngularPages,
@@ -259,6 +260,7 @@ import {
   ROUTER_WRITE_ACTIONS,
   actionBlockedMessage,
   agentAllowed,
+  clearRecordingTargets,
   agentSafety,
   agentTags,
   angularUnavailableText,
@@ -303,6 +305,9 @@ import {
 } from './push-delta.ts';
 import { MARKDOWN_OUTPUT_SCHEMA } from './rpc/agent-output.ts';
 import { createWaitForTool } from './rpc/wait-for.ts';
+import { guardHandler } from './rpc/tool-input.ts';
+import { refusal } from './rpc/refusal.ts';
+import { ROUTER_ACTIONS, unknownRouterActionText } from './router-actions.ts';
 
 type CapacitorToolArgs = {
   page?: string;
@@ -371,7 +376,12 @@ const pangular = defineDevframe({
               ...tool,
               safety: agentSafety(tool.id, config),
               tags: agentTags(tool.id),
-              handler: leased(() => interest, tool.handler),
+              // Arguments are checked against `inputSchema` before the lease
+              // wakes any page, and refusals go out with `isError`.
+              handler: guardHandler(
+                tool.inputSchema,
+                leased(() => interest, tool.handler),
+              ),
             }),
           );
       },
@@ -402,7 +412,9 @@ const pangular = defineDevframe({
 
     // Tabs in the background stop reporting, so their last data stays until
     // they come back or close.
-    const visibility = createPageVisibility();
+    // Pages that beat keep all their reports, so they send only what changed.
+    const heartbeats = createPageHeartbeats();
+    const visibility = createPageVisibility((pageId) => heartbeats.alive(pageId));
     const liveTtl = visibility.ttl();
     const visibilityState = await my.rpc.sharedState('page-visibility', {
       initialValue: { hidden: [] as string[] },
@@ -436,6 +448,24 @@ const pangular = defineDevframe({
       type: 'action',
       jsonSerializable: true,
       handler: (message: unknown) => interest.handle(message),
+    });
+    register({
+      name: 'page-heartbeat',
+      type: 'action',
+      jsonSerializable: true,
+      handler: (message: { pageId?: unknown } | null) => {
+        const pageId = message?.pageId;
+        if (typeof pageId !== 'string' || !pageId || pageId.length >= 50) return undefined;
+        if (!owners.write(pageId)) return undefined;
+        // The forms timeline and the router history outlive the page, counted
+        // from its last sign of life, so a beat counts as their report, in
+        // the shared states too: their tools call a page stale by it.
+        const now = Date.now();
+        touchFormsPage(pageId, now);
+        touchRouter(pageId, now);
+        const known = heartbeats.beat(pageId, now, visibility.has);
+        return { known, ...interest.handle({ pageId }) };
+      },
     });
     const interestTick = setInterval(() => interest.tick(), INTEREST_TICK_MS);
     interestTick.unref?.();
@@ -476,6 +506,8 @@ const pangular = defineDevframe({
         const pageId = message?.pageId;
         if (typeof pageId !== 'string' || !pageId || pageId.length >= 50) return { ok: false };
         const ok = owners.claim(pageId, message?.key);
+        // A claim comes before the page sends everything, so its first beat finds it known.
+        if (ok) heartbeats.beat(pageId);
         // The overlay claims once per load: what the audit holds of the old document is stale.
         if (ok) onPageClaimed(pageId);
         return { ok };
@@ -490,6 +522,7 @@ const pangular = defineDevframe({
         const pageId = report?.pageId;
         if (typeof pageId !== 'string' || !pageId || pageId.length >= 50) return;
         if (!owners.write(pageId)) return;
+        heartbeats.touch(pageId);
         if (visibility.set(pageId, report?.hidden === true)) applyVisibility();
       },
     });
@@ -666,6 +699,17 @@ const pangular = defineDevframe({
         draft.dropped = next.dropped ?? {};
         draft.webMcp = next.webMcp ?? [];
       });
+    /** A sign of life from a page with forms: its report time, here and in the shared state. */
+    const touchFormsPage = (pageId: string, now = Date.now()): boolean => {
+      const page = formPages.get(pageId);
+      if (!page) return false;
+      page.reportedAt = now;
+      formsState.mutate((draft) => {
+        draft.pagesReportedAt = { ...draft.pagesReportedAt, [pageId]: now };
+        draft.reportedAt = Math.min(...[...formPages.values()].map((p) => p.reportedAt));
+      });
+      return true;
+    };
 
     register({
       name: 'push-forms',
@@ -853,13 +897,17 @@ const pangular = defineDevframe({
                 ...(tool as Parameters<typeof ctx.agent.registerTool>[0]),
                 safety,
                 tags: agentTags(String(tool['id'])),
-                handler: leased(() => interest, tool['handler']),
+                handler: guardHandler(
+                  tool['inputSchema'],
+                  leased(() => interest, tool['handler']),
+                ),
               }),
             ),
           pageTools,
           owns,
           mayForget,
           ttl: liveTtl,
+          seenAt: heartbeats.seenAt,
           serverPlugins: info?.serverPlugins,
         })
       : null;
@@ -900,6 +948,15 @@ const pangular = defineDevframe({
       routerState.mutate((draft) => {
         draft.pages = next.pages;
       });
+    /** A sign of life from a page with a router: its report time, here and in the shared state. */
+    const touchRouter = (pageId: string, now = Date.now()): boolean => {
+      if (!touchRouterPage(routerPages, pageId, now)) return false;
+      routerState.mutate((draft) => {
+        const page = draft.pages.find((p) => p.pageId === pageId);
+        if (page) page.reportedAt = now;
+      });
+      return true;
+    };
 
     register({
       name: 'push-router',
@@ -925,15 +982,7 @@ const pangular = defineDevframe({
       name: 'ping-router',
       type: 'action',
       jsonSerializable: true,
-      handler: (pageId: unknown) => {
-        if (!owns(pageId) || !touchRouterPage(routerPages, pageId)) return { known: false };
-        const reportedAt = routerPages.get(pageId as string)!.reportedAt;
-        routerState.mutate((draft) => {
-          const page = draft.pages.find((p) => p.pageId === pageId);
-          if (page) page.reportedAt = reportedAt;
-        });
-        return { known: true };
-      },
+      handler: (pageId: unknown) => ({ known: owns(pageId) && touchRouter(pageId) }),
     });
 
     const pendingActions = new Map<
@@ -1295,20 +1344,24 @@ const pangular = defineDevframe({
     };
 
     const expiry = setInterval(() => {
-      if (visibility.expire()) applyVisibility();
+      // Background marks first, then beats, on one clock: a page whose data
+      // goes in this sweep is gone from the beats too, so its next beat is unknown.
+      const now = Date.now();
+      if (visibility.expire(now)) applyVisibility();
+      heartbeats.expire(now, visibility.has);
       if (angularPages.expire(liveTtl)) applyAngularPages();
-      owners.expire();
-      const staleHttp = [...httpPages].filter(([id, p]) => Date.now() - p.reportedAt > liveTtl(id));
+      owners.expire(now);
+      const staleHttp = [...httpPages].filter(([id, p]) => now - p.reportedAt > liveTtl(id));
       if (staleHttp.length) forgetHttpPages(staleHttp.map(([id]) => id));
-      const stale = [...signalPages].filter(([id, p]) => Date.now() - p.reportedAt > liveTtl(id));
+      const stale = [...signalPages].filter(([id, p]) => now - p.reportedAt > liveTtl(id));
       if (stale.length) forgetSignalPages(stale.map(([id]) => id));
-      if (expireComponentPages(componentPages, Date.now(), liveTtl)) applyComponentPages();
-      if (expireCdPages(cdPages, Date.now(), liveTtl)) applyCd();
+      if (expireComponentPages(componentPages, now, liveTtl)) applyComponentPages();
+      if (expireCdPages(cdPages, now, liveTtl)) applyCd();
       for (const id of goneCdPages) {
         if (!componentPages.has(id) && !injectorPages.has(id)) goneCdPages.delete(id);
       }
       const staleInjectors = [...injectorPages].filter(
-        ([id, p]) => Date.now() - p.reportedAt > liveTtl(id),
+        ([id, p]) => now - p.reportedAt > liveTtl(id),
       );
       if (staleInjectors.length) {
         for (const [id] of staleInjectors) injectorPages.delete(id);
@@ -1316,27 +1369,23 @@ const pangular = defineDevframe({
       }
       const next = expirePages(
         formPages,
-        Date.now(),
+        now,
         limits.formTimeline,
         visibility.ttl(FORMS_PAGE_TTL_MS),
       );
       if (next) applyForms(next);
-      const nextRouter = expireRouterPages(
-        routerPages,
-        Date.now(),
-        visibility.ttl(ROUTER_PAGE_TTL_MS),
-      );
+      const nextRouter = expireRouterPages(routerPages, now, visibility.ttl(ROUTER_PAGE_TTL_MS));
       if (nextRouter) applyRouter(nextRouter);
-      const nextPipes = expirePipePages(pipePages, Date.now(), liveTtl);
+      const nextPipes = expirePipePages(pipePages, now, liveTtl);
       if (nextPipes) applyPipes(nextPipes);
-      if (expireNgrxPages(ngrxPages, Date.now(), liveTtl)) applyNgrx();
-      if (expireCapacitorPages(capacitorPages, Date.now(), liveTtl)) applyCapacitor();
-      errorsInspector?.expire();
-      leaksInspector?.expire();
-      reduxStores?.expire();
-      tanstackQuery?.expire();
-      startupInspector?.expire();
-      pluginsInspector?.expire();
+      if (expireNgrxPages(ngrxPages, now, liveTtl)) applyNgrx();
+      if (expireCapacitorPages(capacitorPages, now, liveTtl)) applyCapacitor();
+      errorsInspector?.expire(now);
+      leaksInspector?.expire(now);
+      reduxStores?.expire(now);
+      tanstackQuery?.expire(now);
+      startupInspector?.expire(now);
+      pluginsInspector?.expire(now);
       componentDeltas.prune((id) => componentPages.has(id));
       injectorDeltas.prune((id) => injectorPages.has(id));
       cdDeltas.prune((id) => cdPages.has(id));
@@ -1527,8 +1576,8 @@ const pangular = defineDevframe({
     };
     const newRuleId = () => `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const httpRuleChange = (change: RuleChange, verb: 'Added' | 'Updated' | 'Removed') => {
-      if (!config.actions.http) return { markdown: actionBlockedMessage('http') };
-      if ('error' in change) return { markdown: change.error };
+      if (!config.actions.http) return { markdown: refusal(actionBlockedMessage('http')) };
+      if ('error' in change) return { markdown: refusal(change.error) };
       setHttpRules(change.rules);
       return { markdown: ruleChangeText(verb, change.rule, change.rules) };
     };
@@ -1572,27 +1621,29 @@ const pangular = defineDevframe({
         httpRuleChange(removeHttpRule(registry.rules ?? [], args.id), 'Removed'),
     });
 
+    // Only the recordings this config lets an agent clear are offered as targets.
+    const clearTargets: string[] = [...clearRecordingTargets(config), 'all'];
+    const clearTargetList = clearTargets.map((target) => `\`${target}\``).join(', ');
     agent.registerTool({
       id: 'pangular:clear-recordings',
       title: 'Clear recordings',
-      description:
-        'Clears recorded HTTP calls, router navigations, or Analog server calls between reproduction runs (development only). Specify `target` as "http", "router", "analog", or "all". An optional `page` clears only the navigations of that specific page.',
+      description: `Clears recorded HTTP calls, router navigations, or Analog server calls between reproduction runs (development only). \`target\` is one of ${clearTargetList}: only the recordings whose inspector, agent tools and action are turned on. An optional \`page\` clears only the navigations of that specific page.`,
       inputSchema: {
         type: 'object',
         required: ['target'],
         properties: {
           target: {
             type: 'string',
-            enum: ['http', 'router', 'analog', 'all'],
-            description: 'Which recordings to clear: `http`, `router`, `analog`, or `all`.',
+            enum: clearTargets,
+            description: `Which recordings to clear: ${clearTargetList}.`,
           },
           page: PAGE_ARGUMENT,
         },
       },
       handler: async (args: { target?: unknown; page?: string }) => {
         const target = typeof args?.target === 'string' ? args.target : undefined;
-        if (!target || !['http', 'router', 'analog', 'all'].includes(target)) {
-          throw new Error('Provide a valid target: "http", "router", "analog", or "all".');
+        if (!target || !clearTargets.includes(target)) {
+          return { markdown: refusal(`Pass \`target\`: one of ${clearTargetList}.`) };
         }
 
         const pageId = pageArgument(args as Record<string, unknown> | undefined);
@@ -1697,12 +1748,7 @@ const pangular = defineDevframe({
       name: 'ping-forms',
       type: 'action',
       jsonSerializable: true,
-      handler: (pageId: unknown) => {
-        const page = owns(pageId) ? formPages.get(pageId) : undefined;
-        if (!page) return { known: false };
-        page.reportedAt = Date.now();
-        return { known: true };
-      },
+      handler: (pageId: unknown) => ({ known: owns(pageId) && touchFormsPage(pageId) }),
     });
 
     register({
@@ -1815,10 +1861,13 @@ const pangular = defineDevframe({
             );
           },
         });
-        void my.rpc.broadcast({
+        // Only the page's own connection gets the request: it can carry the values an agent fills in.
+        // The scoped `broadcast` passes `filter` through to devframe's host; its type leaves it out.
+        void (my.rpc.broadcast as (options: OwnerBroadcast) => Promise<void>)({
           method: 'form-action',
           args: [{ requestId, pageId, request: payload }],
           optional: true,
+          filter: owners.deliversTo(pageId),
         });
       });
 
@@ -2070,8 +2119,16 @@ const pangular = defineDevframe({
     const componentEdits = createComponentEdits({
       config,
       pages: () => componentPages.values(),
-      broadcast: (method, message) =>
-        void my.rpc.broadcast({ method, args: [message], optional: true }),
+      // Only the page's own connection gets the value to write, not the panel or other tabs.
+      broadcast: (method, message) => {
+        const pageId = (message as { pageId?: unknown } | null)?.pageId;
+        void (my.rpc.broadcast as (options: OwnerBroadcast) => Promise<void>)({
+          method,
+          args: [message],
+          optional: true,
+          filter: owners.deliversTo(typeof pageId === 'string' ? pageId : undefined),
+        });
+      },
       answersFor,
     });
     register({
@@ -3067,8 +3124,9 @@ const pangular = defineDevframe({
         if (args?.overlay === undefined) return { markdown: hydrationText(pages) };
         if (!hydrationOverlayAllowed) {
           return {
-            markdown:
+            markdown: refusal(
               'The agent is read-only in the devtools config (agent.readOnly), so it cannot turn the hydration overlay on or off. Use the Hydration section on the Components page of the panel, or call this tool without `overlay`.',
+            ),
           };
         }
         if (typeof args.overlay !== 'boolean') {
@@ -3146,15 +3204,16 @@ const pangular = defineDevframe({
         if (unknown) return { markdown: unknown };
         if (args?.export !== undefined) {
           if (args.export !== 'json' && args.export !== 'trace') {
-            return { markdown: '`export` must be `json` or `trace`.' };
+            return { markdown: refusal('`export` must be `json` or `trace`.') };
           }
           if (args.record !== undefined) {
-            return { markdown: 'Pass either `record` or `export`, not both.' };
+            return { markdown: refusal('Pass either `record` or `export`, not both.') };
           }
           if (cdViewsAsked(args)) {
             return {
-              markdown:
+              markdown: refusal(
                 'Pass either `export` or `flash`, `track` and `angularProfiling`, not both.',
+              ),
             };
           }
           return {
@@ -3168,8 +3227,9 @@ const pangular = defineDevframe({
         }
         if ((args?.record !== undefined || cdViewsAsked(args)) && !cdRecordAllowed) {
           return {
-            markdown:
+            markdown: refusal(
               'The agent is read-only in the devtools config (agent.readOnly), so it cannot start, stop or clear a change detection recording, or turn on the flash overlay, the Performance panel track or Angular profiling. Use the panel, then call this tool without those arguments.',
+            ),
           };
         }
         // The live views draw on a DOM or into the browser's Performance panel.
@@ -3290,6 +3350,13 @@ const pangular = defineDevframe({
         required: ['selector'],
       },
       handler: async (args: { selector: string; page?: string } & InspectSignalsArgs) => {
+        if (typeof args?.selector !== 'string' || !args.selector.trim()) {
+          return {
+            markdown: refusal(
+              'Pass `selector`: a host tag, class name or instance id (such as app-root), `root` for root service effects, or a route path such as /admin.',
+            ),
+          };
+        }
         // `broadcast` resolves with nothing, so the page cannot answer a
         // question. Read the graph the overlay pushes into shared state.
         const page = pageArgument(args);
@@ -3653,8 +3720,10 @@ const pangular = defineDevframe({
         on?: boolean;
         routeId?: string;
       }) => {
+        if (!(ROUTER_ACTIONS as readonly unknown[]).includes(args?.action))
+          return { markdown: refusal(unknownRouterActionText(args?.action)) };
         if (!config.actions.router && ROUTER_WRITE_ACTIONS.includes(args.action))
-          return { markdown: actionBlockedMessage('router') };
+          return { markdown: refusal(actionBlockedMessage('router')) };
         const state = routerState.value() as RouterState;
         const target = args.page
           ? state.pages.find((p) => p.pageId === args.page)
@@ -3668,7 +3737,7 @@ const pangular = defineDevframe({
           };
         }
         if (args.action === 'resolve-lazy' && typeof args.routeId !== 'string')
-          return { markdown: 'routeId is required for resolve-lazy.' };
+          return { markdown: refusal('Pass `routeId`, the id of the lazy route to resolve.') };
         const request =
           args.action === 'navigate'
             ? {
@@ -4132,7 +4201,8 @@ const pangular = defineDevframe({
         `Marker: ${latestMarker(state)}. Call form-diff with since set to the marker you had before this action to see what changed.`,
       );
       // The page writes the message, errors and skipped reasons.
-      return untrusted(lines.join('\n'));
+      const text = untrusted(lines.join('\n'));
+      return result['ok'] ? text : refusal(text);
     };
 
     agent.registerTool({
@@ -4234,7 +4304,8 @@ const pangular = defineDevframe({
       const withUrl = <T extends { pageId: string; reportedAt: number }>(pages: Iterable<T>) =>
         [...pages].map((page) => ({
           pageId: page.pageId,
-          reportedAt: page.reportedAt,
+          // An idle page sends only its heartbeat, which counts as a report here.
+          reportedAt: Math.max(page.reportedAt, heartbeats.seenAt(page.pageId) ?? 0),
           ...details.get(page.pageId),
           platform: platforms.get(page.pageId),
           angular: angularPages.get(page.pageId)?.version,

@@ -73,13 +73,14 @@ Component({
   template: `<form [formRoot]="form"><input id="tname" [formField]="form.name" /><button>Go</button></form>`,
 })(Tasks);
 
-function harness(maxEvents?: number) {
+function harness(maxEvents?: number, offline = () => false) {
   const calls: { name: string; args: any[] }[] = [];
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const my = {
     rpc: {
       call: async (name: string, ...args: unknown[]) => {
         calls.push({ name, args });
+        if (offline()) throw new Error('Not connected to the devframe server');
       },
       register: (def: { name: string; handler: (...args: any[]) => unknown }) => {
         handlers.set(def.name, def.handler);
@@ -285,7 +286,9 @@ describe('forms collector', () => {
     await tick(200);
     const answers = h.calls.filter((c) => c.name === 'form-action-result').map((c) => c.args[0]);
     expect(answers.map((a) => a.requestId)).toEqual(['r3', 'r2']);
-    expect(answers[0].result.error).toBe('Unknown form action.');
+    expect(answers[0].result.error).toMatch(
+      /^Unknown form action "drop-tables"\. Actions: set-value, /,
+    );
     expect(answers[1].result).toMatchObject({ ok: true });
     expect(fixture.componentInstance.form.controls.email.touched).toBe(true);
   });
@@ -468,6 +471,34 @@ describe('forms collector', () => {
   });
 });
 
+describe('forms collector without a server', () => {
+  it('keeps a paced push that fails out of the unhandled rejections', async () => {
+    const fixture = await mount(Login);
+    let down = false;
+    const h = harness(undefined, () => down);
+    h.collector.push();
+    await tick();
+    down = true;
+    const seen: unknown[] = [];
+    const onRejection = (reason: unknown) => seen.push(reason);
+    process.on('unhandledRejection', onRejection);
+    try {
+      // Changes within a second of the last send wait for the paced timer.
+      fixture.componentInstance.form.controls.email.setValue('a@x.io');
+      void h.collector.sync();
+      await tick();
+      fixture.componentInstance.form.controls.email.setValue('b@x.io');
+      void h.collector.sync();
+      await tick(LEASED_PUSH_MS + 200);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+    expect(h.calls.filter((c) => c.name === 'push-forms').length).toBeGreaterThan(1);
+    expect(seen).toEqual([]);
+  });
+});
+
 class Notes {
   form = new FormGroup({
     notes: new FormControl(''),
@@ -500,5 +531,21 @@ describe('forms collector event redaction', () => {
     const events = h.lastEvents().filter((e) => e.type === 'value' && e.path === 'notes');
     expect(JSON.stringify(events)).not.toContain(leak);
     expect(JSON.stringify(events)).toContain('[redacted]');
+  });
+
+  it('masks a value the password field takes after the event was recorded', async () => {
+    const fixture = await mount(Notes);
+    const h = harness();
+    h.collector.push();
+    await tick();
+    const { notes, password } = fixture.componentInstance.form.controls;
+    // The notes event is recorded before the next read learns that the
+    // password field holds the same text.
+    notes.setValue('typed-pass-42');
+    password.setValue('typed-pass-42');
+    await tick(LEASED_PUSH_MS + 200);
+    const sent = JSON.stringify(h.lastEvents());
+    expect(sent).not.toContain('typed-pass-42');
+    expect(sent).toContain('[redacted]');
   });
 });

@@ -4,6 +4,7 @@ import pangular, { createPangular } from '../devframe.ts';
 import type { PangularConfig } from '../config.ts';
 import { agentSafety, resolvePangularConfig } from '../config.ts';
 import { UNTRUSTED } from '../rpc/forms-tools.ts';
+import { answerText } from './tool-answer.ts';
 
 async function boot(config?: PangularConfig) {
   const host = {
@@ -16,7 +17,7 @@ async function boot(config?: PangularConfig) {
   const push = (name: string, payload: unknown) =>
     ctx.rpc.invokeLocal(`pangular:${name}` as never, ...([payload] as never));
   const call = async (tool: string, args: Record<string, unknown>) =>
-    ((await ctx.agent.invoke(`pangular:${tool}`, args)) as { markdown: string }).markdown;
+    await answerText(ctx.agent.invoke(`pangular:${tool}`, args));
   const tools = () => ctx.agent.list().tools.map((tool) => tool.id);
   return { ctx, push, call, tools };
 }
@@ -100,6 +101,29 @@ describe('set-component-property and set-signal', () => {
     });
     expect(prop).toContain('ng.applyChanges');
     expect(sent[1].request).toMatchObject({ kind: 'property', path: 'user.name' });
+  });
+
+  it('send a null value to the page instead of asking for one', async () => {
+    const { ctx, push, call } = await boot();
+    await push('push-component-tree', tree('p1'));
+    const sent = answerEdits(ctx, push, (request) => ({
+      ok: true,
+      kind: request.kind,
+      component: 'Card',
+      path: request.path,
+      value: request.value,
+    }));
+    const text = await call('set-signal', { component: 'p1-a', signal: 'user', value: null });
+    expect(text).not.toContain('Pass `value`');
+    expect(text).toContain('```json\nnull\n```');
+    expect(sent[0].request).toMatchObject({ kind: 'signal', path: 'user', value: null });
+    const prop = await call('set-component-property', {
+      component: 'p1-b',
+      property: 'selected',
+      value: null,
+    });
+    expect(prop).not.toContain('Pass `value`');
+    expect(sent[1].request).toMatchObject({ kind: 'property', path: 'selected', value: null });
   });
 
   it('pass the page refusal on behind the untrusted notice', async () => {

@@ -1,6 +1,12 @@
 import { connectDevframe } from 'devframe/client';
 import { overlayPopup } from './overlay-popup.ts';
-import { overlayConnectOptions, warnOnConnectionTrouble } from './overlay-connection.ts';
+import {
+  forgetDevframeConnection,
+  overlayConnectOptions,
+  overlayReconnectOptions,
+  warnOnConnectionTrouble,
+} from './overlay-connection.ts';
+import { createOverlayLink, type LinkClient } from './overlay-link.ts';
 export { registerNgrxSignals } from './ngrx-register.ts';
 import { attachAnalog } from './analog-runtime.ts';
 import { attachForms } from './forms-collector.ts';
@@ -99,6 +105,7 @@ import { COMPONENT_TREE_SHAPE, INJECTOR_TREE_SHAPE } from './push-delta.ts';
 import { createDomDirty } from './dom-dirty.ts';
 import { domTree } from './host-tree.ts';
 import { LEASED_PUSH_MS, createPageLease, throttle } from './page-lease.ts';
+import { createPageHeartbeat, keepaliveAfter } from './page-heartbeat.ts';
 
 declare global {
   interface Window {
@@ -284,7 +291,16 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       throw noServerError(bases, error, where);
     },
   );
-  if (!own(() => rpc.close?.())) return;
+  // Follows the server through restarts: `my` always calls the live connection.
+  const link = createOverlayLink(rpc as unknown as LinkClient, {
+    connect: async () => {
+      forgetDevframeConnection();
+      return (await connectDevframe(
+        overlayReconnectOptions(options, DEFAULT_BASES, rpc.connection?.metaBaseUrl),
+      )) as unknown as LinkClient;
+    },
+  });
+  if (!own(link.stop)) return;
   if (!own(warnOnConnectionTrouble(rpc, options))) return;
   const metaUrl = rpc.connection?.metaBaseUrl;
   if (metaUrl) {
@@ -292,7 +308,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       ?.then((m) => m.useDevtoolsBase(new URL('.', metaUrl).href))
       .catch(() => {});
   }
-  const my = rpc.scope('pangular');
+  const my = link.scope;
   const devtoolsConfig = configFromConnection(rpc.connectionMeta);
   void overlayPopup()
     ?.then((m) => m.setPopupHotkey(devtoolsConfig.popup.hotkey))
@@ -477,6 +493,9 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       ]),
   });
   own(lease.stop);
+  // One small call keeps every report of this page alive, so unchanged ones aren't sent again.
+  const heartbeat = createPageHeartbeat(my, pageId, { watching: lease.update });
+  own(heartbeat.stop);
   // The first reports go out in full either way, so an idle page is still listed.
   void lease.refresh();
   const stopAnalog = on.analog ? attachAnalog(my, pageId, getNg, limits.refreshMs) : () => {};
@@ -702,7 +721,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       }
       const payload = JSON.stringify(report);
       if (payload === lastRouterPayload) {
-        if (Date.now() - lastRouterPushAt < ROUTER_HEARTBEAT_MS) return;
+        if (!keepaliveAfter(lastRouterPushAt, ROUTER_HEARTBEAT_MS)) return;
         lastRouterPushAt = Date.now();
         const ping = (await my.rpc.call('ping-router', pageId)) as { known?: boolean } | undefined;
         if (ping?.known === false) {
@@ -774,6 +793,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     if (left) return;
     if (document.visibilityState === 'hidden') {
       if (!refresher) return;
+      heartbeat.pause();
       refresher.stop();
       refresher = undefined;
       reportVisibility(true);
@@ -782,6 +802,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
       );
       return;
     }
+    outsideAngular(heartbeat.start);
     if (refresher) return;
     clearInterval(stillHidden);
     reportVisibility(false);
@@ -969,6 +990,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   };
   const leave = () => {
     left = true;
+    heartbeat.pause();
     refresher?.stop();
     refresher = undefined;
     clearInterval(stillHidden);
@@ -977,6 +999,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     forms?.leave();
     forget('forms', 'forget-forms-page');
     forget('router', 'forget-router-page');
+    lastRouterPayload = '';
     forget('pipes', 'forget-pipes-page');
     treeChannel.resync();
     forget('components', 'forget-component-page');
@@ -1001,6 +1024,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   };
   addEventListener('pagehide', leave);
   const resendConfig = () => {
+    // Whatever the server held of this page may be gone: every report goes out again.
+    heartbeat.lost();
     sentGeneration = -1;
     pipes?.resume();
     capacitor?.resume();
@@ -1014,6 +1039,14 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     onVisibility();
   };
   addEventListener('pageshow', resendConfig);
+  // After a server restart: stop sending, then claim the page and send everything again.
+  link.follow({
+    dropped: leave,
+    restored: async () => {
+      await claimPageOnServer(my.rpc, pageId, pageKey);
+      resendConfig();
+    },
+  });
 
   own(() => {
     refresher?.stop();

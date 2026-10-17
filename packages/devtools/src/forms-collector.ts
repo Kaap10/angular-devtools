@@ -17,14 +17,17 @@ import {
   type FormFieldNode,
   type FoundForm,
   forgetFormSecrets,
+  formSecretValues,
   redactFormText,
 } from './forms.ts';
+import { createFormEventMask } from './forms-event-mask.ts';
 import {
   isDevtoolsAction,
-  isFormAction,
+  formActionProblem,
   locateElement,
   runFormAction,
   type ActionContext,
+  type FormActionRequest,
   type FormActionResult,
 } from './forms-actions.ts';
 import {
@@ -199,6 +202,9 @@ export function attachForms(
   let lastForms: CollectedForm[] = [];
   let lastRoots = new Map<string, object>();
   const formEvents: FormEvent[] = [];
+  const remaskEvents = createFormEventMask(redactFormText, () =>
+    [...formSecretValues()].join('\0'),
+  );
   let droppedEvents = 0;
   const watched = new Map<object, { formId: string; stop: () => void }>();
   const lastStatus = new Map<string, string>();
@@ -255,7 +261,8 @@ export function attachForms(
     if (event.type === 'value') {
       const previous = lastValue.get(key);
       if (previous === event.detail) return;
-      if (previous !== undefined) event.prev = previous;
+      // Masked again now: the form's secrets may have grown since the value was seen.
+      if (previous !== undefined) event.prev = redactFormText(event.formId, previous);
       lastValue.set(key, event.detail ?? '');
     }
     if (event.type === 'status') {
@@ -485,7 +492,10 @@ export function attachForms(
         const next = pendingReport;
         pendingReport = null;
         // A page that went idle meanwhile only keeps itself alive, on its next read.
-        if (next && (!options.active || options.active())) void deliver(next, false);
+        // A failed send is sent again in full on the next push (`delta-channel.ts`).
+        if (next && (!options.active || options.active())) {
+          void deliver(next, false).catch(() => {});
+        }
       }, wait);
       return;
     }
@@ -560,6 +570,8 @@ export function attachForms(
         const tool = root && mcp.forms.get(root);
         if (tool) form.webMcp = tool;
       }
+      // The read above may have learned secrets that events recorded before it hold.
+      remaskEvents(formEvents);
       const report = {
         pageId,
         forms,
@@ -810,9 +822,9 @@ export function attachForms(
           ok: false,
           error: 'This page has no Angular debug API (production build?).',
         });
-      if (!isFormAction(message.request))
-        return respond({ ok: false, error: 'Unknown form action.' });
-      const request = message.request;
+      const problem = formActionProblem(message.request);
+      if (problem) return respond({ ok: false, error: problem });
+      const request = message.request as FormActionRequest;
       if (request.formId && !foundById.has(request.formId) && request.action !== 'locate') return;
       if (!request.formId && !FORMLESS_FORM_ACTIONS.includes(request.action)) {
         return respond({ ok: false, error: `${request.action} needs a formId.` });

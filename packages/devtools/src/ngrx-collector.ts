@@ -1,5 +1,5 @@
 import * as angularCore from '@angular/core';
-import { isRedactedKey, REDACTED } from './forms-privacy.ts';
+import { isRedactedKey, REDACTED, withRedactionScope } from './forms-privacy.ts';
 import { documentTree, type HostTree } from './host-tree.ts';
 import { className, tokenName } from './injector-tree.ts';
 import {
@@ -21,12 +21,22 @@ import {
 } from './ngrx-shared.ts';
 import { registeredPatchState, registeredWatchState } from './ngrx-register.ts';
 import { historyRequest, type HistorySource } from './ngrx-history.ts';
+import { markSecretWriter, safeArgs, touchesSecret } from './ngrx-args.ts';
+import { SliceCache } from './ngrx-slice-cache.ts';
 
 /**
  * Angular's `untracked` (16.0+), read at runtime: a named import of it fails
  * the build of an app on Angular 12 to 15 under webpack's strict ESM rules.
  * Signals don't exist before 16.0, so reading the value directly is the same.
  */
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    !!value &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
 function untracked<T>(body: () => T): T {
   const fn = Reflect.get(angularCore, 'untracked') as ((body: () => T) => T) | undefined;
   return typeof fn === 'function' ? fn(body) : body();
@@ -90,7 +100,23 @@ interface Tracked {
    * get labeled with the method's name and args (and their duration folds into
    * the method's rolling stats) instead of showing as a bare `patchState` entry.
    */
-  methodStack: { name: string; args: unknown[]; startedAt: number; fired?: number }[];
+  methodStack: {
+    name: string;
+    args: unknown[];
+    startedAt: number;
+    fired?: number;
+    /** The wrapped method, for the argument masking in `ngrx-args.ts`. */
+    method?: unknown;
+    /** Entries this call logged with arguments, masked after the fact once it writes a secret. */
+    logged?: NgrxLogEntry[];
+  }[];
+  /**
+   * Outer method calls that returned a promise not settled yet. A write after
+   * an `await` runs outside the call's frame, so it is logged as a bare
+   * `patchState`; when it touches a secret, the arguments of these calls are
+   * masked after the fact, since one of them most likely made it.
+   */
+  asyncCalls: Set<Tracked['methodStack'][number]>;
 }
 
 interface Classic {
@@ -197,6 +223,8 @@ function truncated(more: number): { diffTruncated?: number } {
   return more > 0 ? { diffTruncated: Math.min(more, NGRX_DIFF_MORE_CAP) } : {};
 }
 
+const slices = new SliceCache();
+
 function snapshotDiff(before: Snapshot, after: Snapshot, keys: PropertyKey[]): Changes {
   const out: NgrxDiffEntry[] = [];
   const overflow = { more: 0 };
@@ -212,8 +240,8 @@ function snapshotDiff(before: Snapshot, after: Snapshot, keys: PropertyKey[]): C
     }
     const counted = overflow.more;
     const found = diff(
-      serializeSlice(key, before[key]),
-      serializeSlice(key, after[key]),
+      slices.before(key, before[key]),
+      slices.after(key, after[key]),
       MAX_DIFF - out.length,
       undefined,
       overflow,
@@ -267,6 +295,11 @@ export interface NgrxCollector {
   };
   logSince(seq: number): NgrxLogEntry[];
   lastSeq(): number;
+  /**
+   * Entries whose args were masked after update number `after` (a call that
+   * wrote a secret after it logged them), and the last update number.
+   */
+  argsRedactedSince(after: number): { seqs: number[]; last: number };
   /** Entries that became unrestorable after update number `after`, and the last update number. */
   unrestorableSince(after: number): { updates: NgrxUnrestorableUpdate[]; last: number };
   run(request: NgrxRequest): NgrxRequestResult;
@@ -307,6 +340,10 @@ export function createNgrxCollector<H extends object = Element>(
   const attachedDispatchers = new WeakSet<AnyRecord>();
   let lost: (NgrxUnrestorableUpdate & { at: number })[] = [];
   let lostSeq = 0;
+  // Entries whose args were masked after they were logged (and maybe pushed),
+  // numbered like `lost` so the overlay sends each one to the server once.
+  let masked: { seq: number; at: number }[] = [];
+  let maskedSeq = 0;
   // Correlates a store's next `finish()` call with the `@ngrx/signals/events` event
   // whose synchronous `withReducer()` patchState caused it. Populated by the wrapped
   // `dispatch()` (see `wrapDispatch`/`attachDispatcher`) and consumed once by `finish()`.
@@ -332,6 +369,9 @@ export function createNgrxCollector<H extends object = Element>(
     saved.set(full.seq, keep);
     while (log.length > maxLog) saved.delete(log.shift()!.seq);
     if (lost.some((u) => u.seq < log[0].seq)) lost = lost.filter((u) => u.seq >= log[0].seq);
+    if (masked.some((u) => u.seq < log[0].seq)) {
+      masked = masked.filter((u) => u.seq >= log[0].seq);
+    }
     onChange();
     return full;
   };
@@ -342,13 +382,38 @@ export function createNgrxCollector<H extends object = Element>(
     return out;
   };
 
-  const finish = (
+  /** Masks the args of entries already logged, and queues the fix for the server. */
+  const maskLogged = (entries: readonly NgrxLogEntry[] | undefined) => {
+    for (const entry of entries ?? []) {
+      if (!entry.args || entry.args.every((arg) => arg === REDACTED)) continue;
+      entry.args = entry.args.map(() => REDACTED);
+      masked.push({ seq: entry.seq, at: ++maskedSeq });
+    }
+  };
+
+  /**
+   * A write that no method frame claims and that touches a secret: every
+   * async call of the store still running may have made it after an
+   * `await`, so each one's method is marked as a secret writer and the
+   * args it logged are masked, here and (through `argsRedactedSince`) on
+   * the server. rxMethod streams return no promise and are not covered.
+   */
+  const maskAsyncCallers = (t: Tracked, before: Snapshot, after: Snapshot) => {
+    if (!t.asyncCalls.size || !touchesSecret(before, after, t.stateKeys)) return;
+    for (const call of t.asyncCalls) {
+      markSecretWriter(call.method);
+      maskLogged(call.logged);
+    }
+  };
+
+  const finishNow = (
     t: Tracked,
     type: string,
     args: unknown[] | undefined,
     before: Snapshot,
     logNoop = false,
     durationMs?: number,
+    method?: unknown,
   ) => {
     const after = snapshot(t);
     const changes = snapshotDiff(before, after, t.stateKeys);
@@ -364,17 +429,28 @@ export function createNgrxCollector<H extends object = Element>(
     // against stale state.
     if (t.watched) t.lastWatched = after;
     if (!changes.diff.length) {
-      if (!logNoop) return;
+      if (!logNoop) return undefined;
       const noopAt = Date.now();
-      if (noopAt - (t.lastNoop.get(type) ?? 0) < NOOP_GAP_MS) return;
+      if (noopAt - (t.lastNoop.get(type) ?? 0) < NOOP_GAP_MS) return undefined;
       t.lastNoop.set(type, noopAt);
     }
-    append(
+    // A write outside any method frame (after an `await`) that touches a secret.
+    if (!args && !/^Restore #\d+/.test(type)) maskAsyncCallers(t, before, after);
+    return append(
       {
         source: 'signal-store',
         storeId: t.id,
         type,
-        ...(args ? { args: args.map((a) => serialize(a, SMALL)) } : {}),
+        ...(args
+          ? {
+              args: safeArgs(args, (a) => serialize(a, SMALL), {
+                method,
+                before,
+                after,
+                keys: t.stateKeys,
+              }),
+            }
+          : {}),
         timestamp: Date.now(),
         diff: changes.diff,
         ...truncated(changes.more),
@@ -385,6 +461,10 @@ export function createNgrxCollector<H extends object = Element>(
       { kind: 'signal', tracked: t, before, after },
     );
   };
+
+  // The redaction config is read once per update, and key and text answers are reused.
+  const finish = (...args: Parameters<typeof finishNow>) =>
+    withRedactionScope(() => finishNow(...args));
 
   const onWrite = (t: Tracked) => {
     // When a `watchState()` watcher is attached, every patchState (even
@@ -419,7 +499,7 @@ export function createNgrxCollector<H extends object = Element>(
    * `watchState()`. Dedicated to that path (not reused through `finish()`) so
    * it stays small and so it does not trip the per-method noop throttle.
    */
-  const appendChange = (
+  const appendChangeNow = (
     t: Tracked,
     before: Snapshot,
     call: Tracked['methodStack'][number] | undefined,
@@ -436,13 +516,26 @@ export function createNgrxCollector<H extends object = Element>(
     const type = call?.name ?? 'patchState';
     const isRestore = /^Restore #\d+/.test(type);
     const durationMs = call && !isRestore ? Math.round(now() - call.startedAt) : undefined;
-    append(
+    if (call && !isRestore && touchesSecret(before, after, t.stateKeys)) {
+      // An earlier write of the same call may have logged arguments in clear.
+      markSecretWriter(call.method);
+      maskLogged(call.logged);
+    }
+    if (!call) maskAsyncCallers(t, before, after);
+    const logged = append(
       {
         source: 'signal-store',
         storeId: t.id,
         type,
         ...(call?.args?.length && !isRestore
-          ? { args: call.args.map((a) => serialize(a, SMALL)) }
+          ? {
+              args: safeArgs(call.args, (a) => serialize(a, SMALL), {
+                method: call.method,
+                before,
+                after,
+                keys: t.stateKeys,
+              }),
+            }
           : {}),
         timestamp: Date.now(),
         diff: changes.diff,
@@ -454,7 +547,11 @@ export function createNgrxCollector<H extends object = Element>(
       { kind: 'signal', tracked: t, before, after },
     );
     if (call) call.fired = (call.fired ?? 0) + 1;
+    if (call && logged?.args) (call.logged ??= []).push(logged);
   };
+
+  const appendChange = (...args: Parameters<typeof appendChangeNow>) =>
+    withRedactionScope(() => appendChangeNow(...args));
 
   /**
    * Subscribes once through the registered `watchState` so every patchState
@@ -527,11 +624,19 @@ export function createNgrxCollector<H extends object = Element>(
         const outer = t.depth === 0;
         if (outer) flushPending(t);
         const before = outer ? snapshot(t) : null;
-        const frame = { name, args, startedAt: now(), fired: 0 };
+        const frame: Tracked['methodStack'][number] = {
+          name,
+          args,
+          startedAt: now(),
+          fired: 0,
+          method: original,
+        };
         t.methodStack.push(frame);
         t.depth++;
+        let result: unknown;
         try {
-          return Reflect.apply(target, thisArg, args);
+          result = Reflect.apply(target, thisArg, args);
+          return result;
         } finally {
           // Wall-clock time of the synchronous call only: for an rxMethod/effect-style
           // member this is typically fast (it just starts a subscription), not how long
@@ -543,12 +648,21 @@ export function createNgrxCollector<H extends object = Element>(
           t.methodStack.pop();
           t.depth--;
           // Microtask-fallback path: one entry per method call (with throttled noop).
-          if (before && !t.watched) finish(t, name, args, before, true, durationMs);
+          let entry: NgrxLogEntry | undefined;
+          if (before && !t.watched) {
+            entry = finish(t, name, args, before, true, durationMs, original);
+          }
           // watchState path: watchState already emitted one entry per patchState.
           // If the method did not patch at all (e.g. `isSaved` just reads state),
           // append a throttled noop entry so method calls stay visible.
           if (outer && t.watched && !frame.fired) {
-            finish(t, name, args, t.lastWatched ?? snapshot(t), true, durationMs);
+            entry = finish(t, name, args, t.lastWatched ?? snapshot(t), true, durationMs, original);
+          }
+          if (entry?.args) (frame.logged ??= []).push(entry);
+          if (outer && isThenable(result)) {
+            t.asyncCalls.add(frame);
+            const settle = () => void t.asyncCalls.delete(frame);
+            read(() => Promise.resolve(result).then(settle, settle), undefined);
           }
         }
       },
@@ -609,6 +723,7 @@ export function createNgrxCollector<H extends object = Element>(
       watched: false,
       lastWatched: null,
       methodStack: [],
+      asyncCalls: new Set(),
     };
     tracked.set(value, t);
     for (const key of stateKeys) wrapSignal(t, source[key]);
@@ -1418,9 +1533,13 @@ export function createNgrxCollector<H extends object = Element>(
   };
 
   return {
-    collect,
+    collect: (rediscover) => withRedactionScope(() => collect(rediscover)),
     logSince: (after) => log.filter((entry) => entry.seq > after),
     lastSeq: () => seq,
+    argsRedactedSince: (after) => ({
+      seqs: masked.filter((u) => u.at > after).map((u) => u.seq),
+      last: maskedSeq,
+    }),
     unrestorableSince: (after) => ({
       updates: lost.filter((u) => u.at > after).map(({ seq, reason }) => ({ seq, reason })),
       last: lostSeq,
