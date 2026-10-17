@@ -33,10 +33,16 @@ export interface LinkInfo {
   exact?: boolean;
   ariaCurrent?: string;
   element?: string;
+  devtoolsId?: string;
 }
 
 const MAX_OUTLETS = 100;
 const MAX_LINKS = 100;
+/**
+ * Candidate elements asked for their directives per scan. Each check is an
+ * `ng.getDirectives` call, and a scan runs after every DOM change.
+ */
+export const MAX_LINK_CANDIDATES = 2000;
 const MAX_DATA_PREVIEW = 300;
 
 function outletData(outlet: AnyRecord | null): string | undefined {
@@ -155,27 +161,47 @@ function isLinkActive(value: unknown): value is AnyRecord {
 }
 
 /**
+ * Elements that can carry RouterLink or RouterLinkActive. A property-bound
+ * `[routerLink]` leaves no attribute in the DOM, but RouterLink writes `href`
+ * on anchors (and custom elements that observe `href`) and `tabindex` on every
+ * other host (`setTabIndexIfNotOnNativeEl` in @angular/router), so these
+ * attributes find each live link without walking every element.
+ */
+const LINK_CANDIDATES =
+  'a, area, button, [href], [tabindex], [routerlink], [routerLink], [routerlinkactive], [routerLinkActive]';
+
+/**
  * RouterLink and RouterLinkActive directives on the page: where each link
  * points, whether the router considers it active and what RouterLinkActive
- * decided, so the two can be compared.
+ * decided, so the two can be compared. Links past the first 100 are counted
+ * in `cut.links` instead of listed. Only the first `MAX_LINK_CANDIDATES`
+ * elements that could hold a link are checked; the rest are counted in
+ * `cut.unchecked`, so `cut.links` is then a lower bound.
  */
-export function linksOf(ng: RouterDebugApi, router: AnyRecord): LinkInfo[] {
+export function linksOf(
+  ng: RouterDebugApi,
+  router: AnyRecord,
+  cut: { links: number; unchecked?: number } = { links: 0 },
+): LinkInfo[] {
   if (typeof document === 'undefined' || !ng.getDirectives) return [];
-  const elements = Array.from(
-    document.querySelectorAll(
-      'a, button, [routerlink], [routerLink], [routerlinkactive], [routerLinkActive]',
-    ),
-  );
+  const candidates = document.querySelectorAll(LINK_CANDIDATES);
+  const checked = Math.min(candidates.length, MAX_LINK_CANDIDATES);
+  cut.unchecked = candidates.length - checked;
   const out: LinkInfo[] = [];
-  for (const element of elements) {
-    if (out.length >= MAX_LINKS) break;
+  for (let i = 0; i < checked; i++) {
+    const element = candidates[i];
     const directives = read(() => ng.getDirectives?.(element) ?? [], []);
     const link = directives.find(isRouterLink);
     const active = directives.find(isLinkActive);
     if (!link && !active) continue;
+    if (out.length >= MAX_LINKS) {
+      cut.links++;
+      continue;
+    }
     const info: LinkInfo = {
       text: clip((element.textContent ?? '').replace(/\s+/g, ' ').trim(), 60),
       element: element.tagName.toLowerCase(),
+      devtoolsId: elementId(element),
     };
     const tree = read(() => link?.['urlTree'], null);
     if (tree) {

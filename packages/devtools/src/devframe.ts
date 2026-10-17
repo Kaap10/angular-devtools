@@ -107,6 +107,7 @@ import {
 import { LIST_COMPONENTS_DESCRIPTION, listComponentsText } from './rpc/component-outline.ts';
 import { inspectComponentText } from './rpc/component-detail-text.ts';
 import { createComponentEdits } from './rpc/component-edits.ts';
+import { createSignalRestores } from './rpc/signal-restores.ts';
 import { createComponentValues, valueResultText } from './rpc/component-values.ts';
 import { parsePath } from './component-edit.ts';
 import {
@@ -2333,6 +2334,28 @@ const pangular = defineDevframe({
       },
     });
 
+    // The panel's Restore button on a signal's value history; the value stays on the page.
+    const signalRestores = createSignalRestores({
+      config,
+      graphOf: (pageId) => signalPages.get(pageId)?.graph,
+      broadcast: (method, message) =>
+        void my.rpc.broadcast({ method, args: [message], optional: true }),
+      answersFor,
+    });
+    register({
+      name: 'signal-restore-result',
+      type: 'action',
+      jsonSerializable: true,
+      handler: signalRestores.answer,
+    });
+    register({
+      name: 'request-signal-restore',
+      type: 'action',
+      jsonSerializable: true,
+      handler: (message: { pageId?: unknown; request?: unknown } | null) =>
+        signalRestores.request(message?.pageId, message?.request),
+    });
+
     register({
       name: 'forget-signal-page',
       type: 'action',
@@ -3135,10 +3158,12 @@ const pangular = defineDevframe({
             };
           }
           return {
-            markdown: cdExportText(cdState.value() as CdState, {
-              page: args.page,
-              export: args.export,
-            }),
+            markdown: cdExportText(
+              cdState.value() as CdState,
+              { page: args.page, export: args.export },
+              undefined,
+              angularPages.get,
+            ),
           };
         }
         if ((args?.record !== undefined || cdViewsAsked(args)) && !cdRecordAllowed) {
@@ -3523,7 +3548,7 @@ const pangular = defineDevframe({
       id: 'pangular:lint-routes',
       title: 'Lint routes',
       description:
-        "Checks the live route config for common issues: routes after '**', shadowed param routes, missing pathMatch 'full' on empty paths, runtime redirect loops, deprecated guards, title issues, and security flags (e.g. emails or open redirects). Findings indicate severity (throws, warns, or silent) and remediation steps.",
+        "Checks the live route config for common issues: routes after '**', shadowed param routes, missing pathMatch 'full' on empty paths, runtime redirect loops, deprecated guards, title issues, and security flags (e.g. emails or open redirects). Findings indicate severity (throws, warns, or silent) and remediation steps. Link checks cover the first 100 RouterLinks on the page (property-bound [routerLink] included); the answer says how many more were not checked.",
       inputSchema: { type: 'object', properties: { page: pageProperty } },
       handler: async (args: { page?: string }) => {
         const state = routerState.value() as RouterState;
@@ -3880,7 +3905,7 @@ const pangular = defineDevframe({
       id: 'pangular:explain-submit',
       title: 'Explain a form submit',
       description:
-        'Explain what submitting a form will do and why it might do nothing: Signal Forms submit() dry-run (action present, ignoreValidators, already submitting), ngSubmit semantics for reactive and template forms, DOM reasons (no submit button, type="button", disabled button, directive not on a <form>, native validation), blocking and pending fields, and recent submits with their outcome (ran, blocked, threw).',
+        'Explain what submitting a form will do and why it might do nothing: Signal Forms submit() dry-run (action present, ignoreValidators, already submitting), ngSubmit semantics for reactive and template forms, DOM reasons (no submit button, type="button", disabled button, directive not on a <form>, native validation), blocking and pending fields, and recent submits with their outcome (ran, blocked, rejected, threw) and the fields and validators behind it.',
       inputSchema: { type: 'object', properties: { form: formProperty, page: formPageProperty } },
       handler: withForms(explainSubmitText),
     });
@@ -3901,7 +3926,7 @@ const pangular = defineDevframe({
       id: 'pangular:form-history',
       title: 'Show form history',
       description:
-        'Timeline of form changes: value (with previous value and repeat count), status, submit (ran, blocked, threw), added and removed fields, each tagged with its origin (user, code, devtools, binding, or agent for a WebMCP tool call). Filter by form, path, type, origin or `since` (a marker from an earlier call). Returns the current marker.',
+        'Timeline of form changes: value (with previous value and repeat count), status, submit (ran, blocked, rejected, threw, with the fields and validators that blocked or rejected it), added and removed fields, each tagged with its origin (user, code, devtools, binding, or agent for a WebMCP tool call). Filter by form, path, type, origin or `since` (a marker from an earlier call). Returns the current marker.',
       inputSchema: {
         type: 'object',
         properties: {

@@ -576,12 +576,12 @@ Use `explain-navigation` for "why was I redirected". Pass `perf: true` for "why 
 
 ### Read the route config
 
-| Tool                  | What it answers                                                                                                                                                                                                     | Arguments                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `list-routes`         | The live route config: every route with its full path, component or redirect, lazy state, guards, resolvers, title, source file and an example URL.                                                                 | `match`, `audit`, `filter`      |
-| `lint-routes`         | Route config mistakes, such as routes after `**`, redirect cycles, redirect loops seen at runtime, deprecated class guards, missing titles and param typos. Each finding says how Angular reacts and how to fix it. | none                            |
-| `router-config`       | How the router is set up (`provideRouter`, `forRoot or other` or `unknown`), effective options, enabled features, strategies, base href and hydration.                                                              | none                            |
-| `explain-render-mode` | The `ServerRoute` and render mode (Server, Client, Prerender) a URL gets, plus server entries that match no client route.                                                                                           | `url`, defaults to the page URL |
+| Tool                  | What it answers                                                                                                                                                                                                                                                                                                                           | Arguments                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `list-routes`         | The live route config: every route with its full path, component or redirect, lazy state, guards, resolvers, title, source file and an example URL.                                                                                                                                                                                       | `match`, `audit`, `filter`      |
+| `lint-routes`         | Route config mistakes, such as routes after `**`, redirect cycles, redirect loops seen at runtime, deprecated class guards, missing titles and param typos. Each finding says how Angular reacts and how to fix it. Says how many links past the first 100 were not checked, as "at least" when the page stopped checking elements early. | none                            |
+| `router-config`       | How the router is set up (`provideRouter`, `forRoot or other` or `unknown`), effective options, enabled features, strategies, base href and hydration.                                                                                                                                                                                    | none                            |
+| `explain-render-mode` | The `ServerRoute` and render mode (Server, Client, Prerender) a URL gets, plus server entries that match no client route.                                                                                                                                                                                                                 | `url`, defaults to the page URL |
 
 `list-routes` takes three optional arguments:
 
@@ -683,7 +683,7 @@ Two arguments come up in almost every tool:
 | `inspect-forms`          | Without arguments, each form with its status and error count, plus WebMCP tool state for Signal Forms that set `experimentalWebMcpTool`. With `form`, its field tree: value, status, touched, dirty and errors, and a `webMcp` entry with the tool name, inputs, registration status, blocking fields and recent calls. | `form`, `path`, `onlyInvalid`, `includeValues` |
 | `explain-form-invalid`   | Which fields make a form invalid, and why: the failing validator, its message, the value and whether it was touched. Without `form`, every invalid or pending form.                                                                                                                                                     | `form`, `path`                                 |
 | `explain-field`          | One field: where each error comes from, why validation is skipped, the binding and DOM facts like the label and visible error text.                                                                                                                                                                                     | `form`, `path`, or `selector` (a CSS selector) |
-| `explain-submit`         | What submit does, and why it might do nothing.                                                                                                                                                                                                                                                                          | `form`                                         |
+| `explain-submit`         | What submit does, and why it might do nothing. Its recent submits say which fields and validators blocked or rejected them.                                                                                                                                                                                             | `form`                                         |
 | `form-payload`           | What the form sends: `value` against `getRawValue()`, fields that are sent without validation, and which fields the user changed.                                                                                                                                                                                       | `form`, `path`                                 |
 | `explain-custom-control` | How a field is bound to its element, and what is wrong with the binding, such as value drift or a missing `setDisabledState`.                                                                                                                                                                                           | `form`, `path`                                 |
 
@@ -711,6 +711,8 @@ With `path`, `inspect-forms`, `explain-form-invalid` and `form-payload` start at
 | `wait-for-form` | Waits until a condition holds, or reports the state on timeout.                                                                  | `form`, `until` (`settled`, `valid`, `not-pending` or `submitted`), `since`, `timeoutMs` (default 5000, at most 30000) |
 | `export-form`   | A JSON snapshot, or a test fixture with the expected status. Secret values stay redacted.                                        | `form`, `format` (`snapshot` or `fixture`)                                                                             |
 | `lint-forms`    | Form bugs, NG01xxx setup errors and model-aware accessibility checks, like a missing label or error text that is not linked.     | `form`                                                                                                                 |
+
+A `submit` event has an outcome: `ran`, `blocked` (the Signal Forms action did not run), `rejected` (the action returned errors) or `threw`. Its detail names the fields and the validator kinds that blocked it, or the fields and messages the action rejected. See [Submit view](../inspectors/forms.md#submit-view).
 
 Markers let an agent check its own work: read the marker, act, then call `form-diff` with `since` set to it. A marker counts events across every open page and keeps counting after a page reloads, so it stays valid when the agent works in another tab.
 
@@ -912,10 +914,10 @@ These tools cover *Analog apps. Most read your source. Some also read what the V
 
 ### Rendering
 
-| Tool                    | What it answers                                                                                                                                                   | Arguments |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `analog-render-modes`   | For each page: server rendered, prerendered, cached, redirected or client only, the route rule or config that decides it, and what the last request actually did. | none      |
-| `analog-prerender-plan` | `prerender.routes` and `routeRules` with `prerender: true`, compared with the page files and the build output.                                                    | none      |
+| Tool                    | What it answers                                                                                                                                                                                                      | Arguments |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `analog-render-modes`   | For each page: server rendered, prerendered, cached, redirected or client only, the route rule or config that decides it, and what the last request actually did. Says when `vite.config` could not be read in full. | none      |
+| `analog-prerender-plan` | `prerender.routes` and `routeRules` with `prerender: true`, compared with the page files and the build output. Says when `vite.config` could not be read in full.                                                    | none      |
 
 ### Call a server route <ngmd-badge variant="alpha">Destructive</ngmd-badge>
 
@@ -932,7 +934,7 @@ These tools cover *Analog apps. Most read your source. Some also read what the V
 
 ### Lint
 
-`analog-lint` finds Analog mistakes: two files for one URL, a missing default export, a layout without `router-outlet`, bad API method suffixes, prerender entries that match nothing, and frontmatter errors. It also reports live problems, like a `load()` fetched twice, a server function read that runs again after hydration, or a restart needed. Hydration errors and restart hints come from one page: pass `page` to pick it, or leave it out for the most recent. If no page with that id sends Analog data, the answer says so and lists the pages that do.
+`analog-lint` finds Analog mistakes: two files for one URL, a missing default export, a layout without `router-outlet`, bad API method suffixes, prerender entries that match nothing, frontmatter errors, and a `vite.config` it could not read in full (`config-partial`). It also reports live problems, like a `load()` fetched twice, a server function read that runs again after hydration, or a restart needed. Hydration errors and restart hints come from one page: pass `page` to pick it, or leave it out for the most recent. If no page with that id sends Analog data, the answer says so and lists the pages that do.
 
 <ngmd-alert severity="helpful">
   <code>analog-server-calls</code> and <code>analog-call-api</code> need the <a href="../getting-started/vite.md">Vite plugin</a>. The plugin records the calls and knows the dev server address.

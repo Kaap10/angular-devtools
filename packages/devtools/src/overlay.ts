@@ -52,6 +52,7 @@ import {
 } from './router-actions.ts';
 import { createSignalHistory, installSignalWriteHook } from './signal-history.ts';
 import { registerSignalPeek } from './signal-peek.ts';
+import { registerSignalRestore } from './signal-restore.ts';
 import { createSignalWatch, registerSignalWatch } from './signal-watch.ts';
 export { installSignalWriteHook } from './signal-history.ts';
 import {
@@ -365,6 +366,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     (value, name) => graphValue(name, value),
     {
       stacks: signalWatch.stacks,
+      restorable: on.signals && devtoolsConfig.actions.components,
       onChange: (id, label, change, raw) => {
         signalWatch.onChange(id, label, change);
         if (on.errors) recentWrites.add(id, label, change, raw);
@@ -490,6 +492,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     : null;
   const pipes = on.pipes ? attachPipes(my, pageId, getNg) : null;
   const http = on.http ? attachHttp(my, pageId, tickMs) : null;
+  if (http) own(http.stop);
   const capacitor = on.capacitor
     ? attachCapacitor(my, pageId, {
         maxCalls: limits.capacitorCalls,
@@ -564,6 +567,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   let routerDomDirty = true;
   let outlets: ReturnType<typeof outletsOf> = [];
   let links: ReturnType<typeof linksOf> = [];
+  let linksTruncated = 0;
+  let linksUnchecked = 0;
   const routerDomObserver =
     on.router && typeof MutationObserver === 'function'
       ? new MutationObserver(() => (routerDomDirty = true))
@@ -650,6 +655,8 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     routerDomDirty = true;
     outlets = [];
     links = [];
+    linksTruncated = 0;
+    linksUnchecked = 0;
   }
 
   async function pushRouter() {
@@ -681,10 +688,15 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
         if (routerDomDirty) {
           routerDomDirty = false;
           outlets = outletsOf(router);
-          links = linksOf(ng, router);
+          const cut = { links: 0, unchecked: 0 };
+          links = linksOf(ng, router, cut);
+          linksTruncated = cut.links;
+          linksUnchecked = cut.unchecked;
         }
         report['outlets'] = outlets;
         report['links'] = links;
+        if (linksTruncated) report['linksTruncated'] = linksTruncated;
+        if (linksUnchecked) report['linksUnchecked'] = linksUnchecked;
         report['preloads'] = preloads;
         report['instrumented'] = instrumented;
       }
@@ -865,6 +877,14 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
     (target) => collectSignalGraph(getNg(), target),
     signalHistory,
   );
+  if (on.signals) {
+    registerSignalRestore(my.rpc, pageId, {
+      getNg,
+      history: signalHistory,
+      allowed: devtoolsConfig.actions.components,
+      restored: () => void pushSignalGraph(true).catch(() => {}),
+    });
+  }
 
   my.rpc.register({
     name: 'inspect-component-in-page',

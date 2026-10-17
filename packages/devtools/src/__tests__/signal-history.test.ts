@@ -8,6 +8,7 @@ import {
   installSignalWriteHook,
   type RawSignalNode,
 } from '../signal-history.ts';
+import { setRawValue } from '../signal-locator.ts';
 import type { SignalGraphNode } from '../types.ts';
 
 const identity = (v: unknown) => v;
@@ -303,6 +304,66 @@ describe('createSignalHistory', () => {
   });
 });
 
+describe('raw values kept for restores', () => {
+  const located = (epoch: number, value: unknown, locator = true): SignalGraphNode => {
+    const node = graphNode('a', 'count', epoch, value);
+    if (locator) node.locator = { id: 'c1', key: 'count' };
+    setRawValue(node, value);
+    return node;
+  };
+
+  /** One sampled entry (epoch 0) and one written entry (epoch 1). */
+  async function record(h: ReturnType<typeof createSignalHistory>, locator = true) {
+    const raw: RawSignalNode = { debugName: 'count', kind: 'signal', value: 0, version: 0 };
+    h.collect([located(0, 0, locator)]);
+    write(h.onWrite, raw, 1);
+    await Promise.resolve();
+    h.collect([located(1, 1, locator)]);
+    return [h.rawEntry('a', 0), h.rawEntry('a', 1)];
+  }
+
+  it('keeps no raw values when restores are off', async () => {
+    const entries = await record(
+      createSignalHistory(identity, Date.now, identity, { located: () => true }),
+    );
+    expect(entries).toEqual([
+      { found: false, reason: 'unkept' },
+      { found: false, reason: 'unkept' },
+    ]);
+  });
+
+  it('keeps no raw values for a node without a locator', async () => {
+    const entries = await record(
+      createSignalHistory(identity, Date.now, identity, { restorable: true, located: () => false }),
+      false,
+    );
+    expect(entries).toEqual([
+      { found: false, reason: 'unkept' },
+      { found: false, reason: 'unkept' },
+    ]);
+  });
+
+  it('keeps raw values for a node with a locator when restores are on', async () => {
+    const h = createSignalHistory(identity, Date.now, identity, {
+      restorable: true,
+      located: () => true,
+    });
+    const entries = await record(h);
+    expect(entries.map((e) => e.found && e.value)).toEqual([0, 1]);
+  });
+
+  it('drops the raw values of a node that lost its locator', async () => {
+    const h = createSignalHistory(identity, Date.now, identity, {
+      restorable: true,
+      located: () => true,
+    });
+    await record(h);
+    h.collect([located(1, 1, false)]);
+    expect(h.rawEntry('a', 0)).toEqual({ found: false, reason: 'unkept' });
+    expect(h.rawEntry('a', 1)).toEqual({ found: false, reason: 'unkept' });
+  });
+});
+
 describe('installSignalWriteHook', () => {
   function fakeCore() {
     let current: ((n: RawSignalNode) => void) | null = null;
@@ -365,6 +426,40 @@ describe('installSignalWriteHook', () => {
     expect(
       await installSignalWriteHook(vi.fn(), () => import('../signals-stub.ts') as never),
     ).toBeNull();
+  });
+
+  it('returns null when the hook is called without the written node, as before Angular 20', async () => {
+    const core = fakeCore();
+    const prev = vi.fn();
+    core.setPostSignalSetFn(prev);
+    // Angular 17.0 to 19.x: `postSignalSetFn?.()`.
+    const old = { ...core, SIGNAL_NODE: {}, signalSetFn: () => core.fire(undefined as never) };
+    expect(await installSignalWriteHook(vi.fn(), async () => old)).toBeNull();
+    expect(core.get()).toBe(prev);
+    expect(prev).not.toHaveBeenCalled();
+  });
+
+  it('installs when the probe write hands over the node, without the app hook seeing it', async () => {
+    const core = fakeCore();
+    const prev = vi.fn();
+    core.setPostSignalSetFn(prev);
+    const current = {
+      ...core,
+      SIGNAL_NODE: { kind: 'signal' },
+      signalSetFn: (node: RawSignalNode, value: unknown) => {
+        node.value = value;
+        core.fire(node);
+      },
+    };
+    const onWrite = vi.fn();
+    const restore = await installSignalWriteHook(onWrite, async () => current);
+    expect(restore).toBeTypeOf('function');
+    expect(prev).not.toHaveBeenCalled();
+    expect(onWrite).not.toHaveBeenCalled();
+    core.fire({ debugName: 'x' });
+    expect(onWrite).toHaveBeenCalledTimes(1);
+    restore!();
+    expect(core.get()).toBe(prev);
   });
 
   it('returns a restore function when the hook installs', async () => {

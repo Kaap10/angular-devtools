@@ -35,7 +35,7 @@ export interface ExpressionChangedExplain {
   members?: string[];
   /** Named signals written with the current value shortly before the error. */
   writes?: ExplainWrite[];
-  /** Whether the page hears signal writes at all (Signals inspector on, Angular 17+). */
+  /** Whether the page hears signal writes at all (Signals inspector on, Angular 20.0+). */
   writesKnown?: boolean;
 }
 
@@ -208,7 +208,7 @@ export function explainSection(
         );
       } else {
         lines.push(
-          '- Where it was written is unknown: the page does not report signal writes (the Signals inspector is off, or Angular is older than 17.0).',
+          '- Where it was written is unknown: the page does not report signal writes (the Signals inspector is off, or Angular is older than 20.0).',
         );
       }
       return lines.join('\n');
