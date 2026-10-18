@@ -58,7 +58,7 @@ function mcpRequests(): string[] {
       jsonrpc: '2.0',
       id: 3,
       method: 'tools/call',
-      params: { name: 'pangular_build-meta', arguments: {} },
+      params: { name: 'pangular_scan-build', arguments: {} },
     },
   ].map((message) => JSON.stringify(message));
 }
@@ -76,9 +76,20 @@ async function mcp(args: string[], cwd: string) {
   const tools = (replies.find((reply) => reply.id === 2)?.result?.['tools'] ?? []) as {
     name: string;
   }[];
-  const meta = replies.find((reply) => reply.id === 3)?.result?.['structuredContent'] as
-    { projectName?: string } | undefined;
-  return { ...result, tools: tools.map((tool) => tool.name.replace(/^pangular_/, '')), meta };
+  const metaReply = replies.find((reply) => reply.id === 3)?.result;
+  const metaText = ((metaReply?.['content'] as { text?: string }[] | undefined) ?? [])[0]?.text;
+  // A source scan answers compact JSON as its one text block, with no structured copy.
+  const meta =
+    metaReply?.['isError'] || !metaText
+      ? undefined
+      : (JSON.parse(metaText) as { projectName?: string });
+  return {
+    ...result,
+    tools: tools.map((tool) => tool.name.replace(/^pangular_/, '')),
+    meta,
+    metaText,
+    metaRefused: metaReply?.['isError'] === true,
+  };
 }
 
 describe('pangular binary', () => {
@@ -114,15 +125,15 @@ describe('pangular binary', () => {
     const { tools, meta, stderr } = await mcp(['--root', REPO], elsewhere);
     expect(meta?.projectName).toBe('pangular-inspector');
     expect(stderr).not.toContain('source scans find nothing');
-    expect(tools).toContain('get-components');
-    expect(tools).toContain('lint-pipes');
+    expect(tools).toContain('scan-components');
+    expect(tools).toContain('scan-pipe-usage');
     for (const pageTool of [
       'highlight',
       'inspect-component',
       'defer-blocks',
       'change-detection',
       'navigate',
-      'form-action',
+      'run-form-action',
       'fill-form',
       'list-routes',
     ]) {
@@ -136,12 +147,18 @@ describe('pangular binary', () => {
       join(elsewhere, 'devtools.json'),
       JSON.stringify({ inspectors: { analog: false, pipes: false } }),
     );
-    const { tools, meta, stderr } = await mcp(['--config', 'devtools.json'], elsewhere);
-    expect(meta?.projectName).toBe('unknown');
+    const { tools, metaRefused, metaText, stderr } = await mcp(
+      ['--config', 'devtools.json'],
+      elsewhere,
+    );
     expect(stderr).toContain('source scans find nothing');
+    // The agent never sees stderr, so a source scan refuses and names the folder too.
+    expect(metaRefused).toBe(true);
+    expect(metaText).toContain('no angular.json');
+    expect(metaText).toContain('--root');
     expect(tools.some((tool) => tool.startsWith('analog-'))).toBe(false);
-    expect(tools).not.toContain('get-pipes');
-    expect(tools).toContain('get-components');
+    expect(tools).not.toContain('scan-pipes');
+    expect(tools).toContain('scan-components');
   }, 30_000);
 });
 

@@ -5,7 +5,7 @@ import {
   cdTraceFile,
   parseCdImport,
 } from '@pangular-inspector/devtools/cd-data';
-import type { CdReport } from '@pangular-inspector/devtools/config';
+import type { CdReport } from '@pangular-inspector/devtools/internal/config';
 
 /** A recording read from a file, checked like a page push. */
 export interface CdImported {
@@ -59,7 +59,7 @@ function download(value: unknown, fileName: string) {
       height: var(--control-h);
       padding: 0 12px;
       background: var(--surface-2);
-      border: 1px solid var(--border-strong);
+      border: 1px solid var(--control-border);
       border-radius: var(--radius-sm);
       color: var(--text);
       cursor: pointer;

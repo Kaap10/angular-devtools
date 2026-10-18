@@ -13,13 +13,30 @@ async function boot() {
   const ctx = await createHostContext({ cwd: process.cwd(), mode: 'dev', host: host as never });
   await pangular.setup(ctx as never);
   const sent: { method: string; args: [Record<string, unknown>] }[] = [];
-  vi.spyOn(ctx.rpc, 'broadcast').mockImplementation((async (options: (typeof sent)[number]) => {
-    sent.push(options);
-  }) as never);
   const push = (name: string, payload: unknown) =>
     ctx.rpc.invokeLocal(`pangular:${name}` as never, ...([payload] as never));
+  vi.spyOn(ctx.rpc, 'broadcast').mockImplementation((async (options: (typeof sent)[number]) => {
+    sent.push(options);
+    // A page that reports confirms a record request by pushing its recording.
+    const { pageId, on } = options.args[0] as { pageId?: string; on?: boolean };
+    if (options.method === 'pangular:change-detection-record' && typeof on === 'boolean') {
+      setTimeout(
+        () => void push('push-change-detection', { ...report(pageId ?? 'p1'), recording: on }),
+        5,
+      );
+    }
+  }) as never);
+  // Recording and the live views are record-change-detection; reading is change-detection.
+  const writes = ['record', 'flash', 'track', 'angularProfiling'];
   const call = async (args: Record<string, unknown>) =>
-    await answerText(ctx.agent.invoke('pangular:change-detection', args));
+    await answerText(
+      ctx.agent.invoke(
+        Object.keys(args).some((key) => writes.includes(key))
+          ? 'pangular:record-change-detection'
+          : 'pangular:change-detection',
+        args,
+      ),
+    );
   const options = () => sent.filter((s) => s.method === 'pangular:change-detection-options');
   return { push, call, sent, options };
 }
@@ -81,16 +98,16 @@ describe('change detection views', () => {
     expect(options()).toHaveLength(sent);
   });
 
-  it('combines views with record, but not with export', async () => {
-    const { call, sent } = await boot();
+  it('combines views with record', async () => {
+    const { call, sent, push } = await boot();
+    await push('push-change-detection', report('p1'));
+    sent.length = 0;
     const text = await call({ record: 'start', flash: true });
-    expect(text).toMatch(/^Recording started/);
+    expect(text).toMatch(/^Recording started on page `p1`/);
     expect(text).toContain('Flash overlay turned on');
-    expect(sent.map((s) => s.method)).toEqual([
-      'pangular:change-detection-options',
-      'pangular:change-detection-record',
-    ]);
-    expect(await call({ export: 'json', flash: true })).toMatch(/not both/);
+    expect(
+      sent.map((s) => s.method).filter((method) => method.includes('change-detection')),
+    ).toEqual(['pangular:change-detection-options', 'pangular:change-detection-record']);
   });
 
   it('keeps the views a page reports and lists them in the answer', async () => {

@@ -1,3 +1,4 @@
+import { queueMicrotaskOutside, setTimeoutOutside } from './outside-angular.ts';
 import { isRouterLink } from './router-links.ts';
 import {
   CANCEL_CODES,
@@ -163,8 +164,8 @@ export function captureCallers(
     if (!link) return;
     fromClick = true;
     setCaller(`RouterLink ${describeElement(link)}`, true);
-    queueMicrotask(() => {
-      setTimeout(() => (fromClick = false));
+    queueMicrotaskOutside(() => {
+      setTimeoutOutside(() => (fromClick = false));
     });
   };
   if (typeof document !== 'undefined') document.addEventListener('click', onClick, true);
@@ -595,7 +596,7 @@ function waitForNavigation(
       const record = navigations.find((n) => n.id === id);
       if (record && record.outcome !== 'pending') return resolve(record);
       if (Date.now() - started > WAIT_MS) return resolve(record);
-      setTimeout(tick, 50);
+      setTimeoutOutside(tick, 50);
     };
     tick();
   });
@@ -635,10 +636,10 @@ export function waitForStable(router: AnyRecord, ms: number): Promise<boolean | 
       if (done) return;
       done = true;
       clearTimeout(timer);
-      queueMicrotask(() => subscription?.unsubscribe());
+      queueMicrotaskOutside(() => subscription?.unsubscribe());
       resolve(stable);
     };
-    const timer = setTimeout(() => finish(false), Math.max(0, ms));
+    const timer = setTimeoutOutside(() => finish(false), Math.max(0, ms));
     subscription = read(
       () =>
         pending['subscribe']((busy: unknown) => {
@@ -663,6 +664,36 @@ function summarize(record: NavigationRecord | undefined): Record<string, unknown
     finalUrl: record.finalUrl,
     code: record.code,
     reason: record.reason,
+  };
+}
+
+/**
+ * The summary of a navigation, and where a redirect took the app: a guard or
+ * resolver that redirects ends the navigation as `redirected` with its own
+ * URL, and the router starts a new one. That one is waited for (within the
+ * same 10s), so `finalUrl` is where the app ended up, not the URL asked for.
+ */
+async function followRedirect(
+  navigations: NavigationRecord[],
+  record: NavigationRecord | undefined,
+  started: number,
+): Promise<Record<string, unknown>> {
+  const result = summarize(record);
+  if (!record || record.outcome !== 'redirected') return result;
+  const follower = await new Promise<NavigationRecord | undefined>((resolve) => {
+    const tick = () => {
+      const next = navigations.find((n) => n.redirectedFrom === record.id);
+      if (next && next.outcome !== 'pending') return resolve(next);
+      if (Date.now() - started > WAIT_MS) return resolve(next);
+      setTimeoutOutside(tick, 50);
+    };
+    tick();
+  });
+  if (!follower) return result;
+  return {
+    ...result,
+    finalUrl: follower.finalUrl ?? follower.url,
+    redirect: { id: follower.id, outcome: follower.outcome },
   };
 }
 
@@ -765,7 +796,7 @@ function probe(router: AnyRecord, navigations: NavigationRecord[], url: string):
         );
       }
     });
-    timer = setTimeout(() => {
+    timer = setTimeoutOutside(() => {
       subscription.unsubscribe();
       abortCurrent();
       markProbe(targetId);
@@ -856,7 +887,11 @@ export async function runAction(
       promise?.catch?.(() => {});
       const id = navigationIdOf(router);
       const started = Date.now();
-      const result = summarize(await waitForNavigation(navigations, id));
+      const result = await followRedirect(
+        navigations,
+        await waitForNavigation(navigations, id),
+        started,
+      );
       if (request.waitFor !== 'stable') return result;
       const stable = await waitForStable(router, WAIT_MS - (Date.now() - started));
       if (stable === null)

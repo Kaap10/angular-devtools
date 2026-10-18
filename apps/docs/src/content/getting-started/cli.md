@@ -33,12 +33,15 @@ The package installs a `pangular` binary. Run it from the root of your Angular w
 
 If the project folder has no `angular.json` and no `package.json` that depends on `@angular/core`, the CLI prints a warning on stderr, because the scans find nothing there.
 
+### Nx workspaces
+
+The scans read the `sourceRoot` of every project in `angular.json`. In an Nx workspace, which has no `angular.json`, they read the `sourceRoot` of every `project.json`, and the `src` folder of every package that has a `package.json`, so apps and libraries are both covered. Run the CLI from the workspace root for that. When the scans find no source folder at all, the CLI, the hub and the Vite plugin print a warning once.
+
 ### Config file
 
-The file holds the same options as `createPangular()`, as JSON:
+The file holds the same options as `createPangular()`, as JSON. Save this as `pangular.config.json`:
 
 ```json
-// pangular.config.json
 {
   "inspectors": {"analog": false},
   "agent": {"readOnly": true},
@@ -48,10 +51,9 @@ The file holds the same options as `createPangular()`, as JSON:
 
 A missing `--config` file or invalid JSON stops the command with an error.
 
-The file can also list `allowedOrigins` for `pangular dev`, like `--allowed-origin`. They stay on the server and are not part of the config pages receive:
+The file can also list `allowedOrigins` for `pangular dev`, like `--allowed-origin`. They stay on the server and are not part of the config pages receive. In `pangular.config.json`:
 
 ```json
-// pangular.config.json
 {
   "allowedOrigins": ["http://192.168.1.20:8100"]
 }
@@ -98,10 +100,10 @@ The default command starts a local server with the devtools UI. `dev` is optiona
 npx @pangular-inspector/devtools dev --port 9999 --open
 ```
 
-When the server is ready, it prints the version, the panel URL, the panel URL for [Angular Native](./angular-native.md) apps and the MCP endpoint:
+When the server is ready, it prints the package version, the panel URL, the panel URL for [Angular Native](./angular-native.md) apps and the MCP endpoint:
 
 ```text
-  pangular v0.0.7
+  pangular v<version>
   Panel: http://localhost:9999/
   Angular Native apps: http://localhost:9999/?view=angular-native
   MCP:   http://localhost:9999/__mcp
@@ -115,7 +117,7 @@ When the server listens on your network (`--host 0.0.0.0` or a network address),
 
 | Flag                        | What it does                                                                                                                                                                                                                                                                                                                 |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--port <port>`             | Port to listen on. The default is 9999. If it is taken, a random free port is used.                                                                                                                                                                                                                                          |
+| `--port <port>`             | Port to listen on. The default is 9999. Without `--port`, if 9999 is taken, a free port is used. With `--port`, a taken port stops the server with an error.                                                                                                                                                                 |
 | `--host <host>`             | Host to bind to. The default is `localhost`.                                                                                                                                                                                                                                                                                 |
 | `--open`, `--no-open`       | Open the browser on start, or not.                                                                                                                                                                                                                                                                                           |
 | `--no-auth`                 | Turn off the one-time code the server asks for.                                                                                                                                                                                                                                                                              |
@@ -155,11 +157,11 @@ npx @pangular-inspector/devtools build --outDir dist-report
 
 ### Report flags
 
-| Flag             | What it does                                                              |
-| ---------------- | ------------------------------------------------------------------------- |
-| `--outDir <dir>` | Output directory. The default is `dist-static`. It is emptied first.      |
-| `--pretty`       | Pretty-print the data files. They get larger on disk.                     |
-| `--force`        | Empty `--outDir` even when it holds files that are not a previous report. |
+| Flag             | What it does                                                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `--outDir <dir>` | Output directory, relative to the project folder (`--root`). The default is `dist-static`. It is emptied first. `--out-dir` works too. |
+| `--pretty`       | Pretty-print the data files. They get larger on disk.                                                                                  |
+| `--force`        | Empty `--outDir` even when it holds files that are not a previous report.                                                              |
 
 ### Output folder checks
 
@@ -192,19 +194,19 @@ Your agent client runs this command for you. [MCP server](../agents/mcp-server.m
 npx @pangular-inspector/devtools mcp --print-config --port 4000 --base /__devframes/
 ```
 
-| Flag             | What it does                                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `--print-config` | Print the client config and exit.                                                                                            |
-| `--host <host>`  | Host of the server that runs your app, for the HTTP config. The default is `localhost`.                                      |
-| `--port <port>`  | Port of that server, from 1 to 65535. The default is 9999, the standalone CLI.                                               |
-| `--base <path>`  | The hub base, such as `/__devframes/` for the Express hub and the Vite plugin. With it, the HTTP config sends the MCP token. |
-| `--https`        | The server is behind TLS, so the HTTP config uses `https://`.                                                                |
+| Flag             | What it does                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `--print-config` | Print the client config and exit.                                                                                  |
+| `--host <host>`  | Host of the server that runs your app, for the HTTP config. The default is `localhost`.                            |
+| `--port <port>`  | Port of that server, from 1 to 65535. The default is 9999, the standalone CLI.                                     |
+| `--base <path>`  | The hub base, such as `/__devframes/` for the Express hub and the Vite plugin. The HTTP URL becomes `<base>__mcp`. |
+| `--https`        | The server is behind TLS, so the HTTP config uses `https://`.                                                      |
 
-`--root`, `--config` and `--read-only` go into the printed stdio command, with absolute paths. The stdio server is named `pangular` and the HTTP server `pangular-live`, so a client can hold both. With `--base` and a `--host` that is not a loopback address, the output warns that the token travels in clear text over `http`; pass `--https` when the server is behind TLS.
+`--root`, `--config` and `--read-only` go into the printed stdio command, with absolute paths. The stdio server is named `pangular` and the HTTP server `pangular-live`, so a client can hold both. The HTTP config always sends the MCP token, for the hub and for the standalone CLI. With a `--host` that is not a loopback address and no `--https`, the output warns that the token travels in clear text over `http`; pass `--https` when the server is behind TLS.
 
 ### Source scan only
 
-The stdio server has no page connected, so it registers only the tools that read your source files. The tools that need a page, such as `highlight`, `navigate`, `form-action` and the forms and router tools, are left out. For live data, point your agent at the HTTP endpoint of a running app instead. On a hub it lives at `/__devframes/__mcp`.
+The stdio server has no page connected, so it registers only the tools that read your source files. The tools that need a page, such as `highlight`, `navigate`, `run-form-action` and the forms and router tools, are left out. For live data, point your agent at the HTTP endpoint of a running app instead. On a hub it lives at `/__devframes/__mcp`.
 
 ## Agent skills
 
@@ -226,11 +228,11 @@ pangular skills install --agent agents --dry-run
 npx pangular lint --format sarif --output reports/pangular.sarif --fail-on error
 ```
 
-| Lint        | Agent tool                                            | What it checks                                                                                        |
-| ----------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `templates` | [`lint-templates`](../agents/tools.md#lint-templates) | Component templates, parsed with your project's own `@angular/compiler`. Skipped when it is missing.  |
-| `pipes`     | [`lint-pipes`](../agents/tools.md#lint-pipes)         | Pipe use in templates and pipe declarations.                                                          |
-| `analog`    | [`analog-lint`](../agents/tools.md#lint)              | The static Analog checks: routes, API routes, server files, content and prerender. Skipped elsewhere. |
+| Lint        | Agent tool                                              | What it checks                                                                                        |
+| ----------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `templates` | [`scan-templates`](../agents/tools.md#scan-templates)   | Component templates, parsed with your project's own `@angular/compiler`. Skipped when it is missing.  |
+| `pipes`     | [`scan-pipe-usage`](../agents/tools.md#scan-pipe-usage) | Pipe use in templates and pipe declarations.                                                          |
+| `analog`    | [`analog-lint`](../agents/tools.md#lint)                | The static Analog checks: routes, API routes, server files, content and prerender. Skipped elsewhere. |
 
 `lint-forms`, `lint-routes` and the live checks of `analog-lint` read the running page, so `lint` leaves them out. When a lint is skipped, the command says why on stderr and the JSON lists it with `ran: false`.
 

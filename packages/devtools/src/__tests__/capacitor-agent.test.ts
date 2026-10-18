@@ -1,6 +1,6 @@
 import { createHostContext } from 'devframe/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import pangular, { createPangular } from '../devframe.ts';
+import { createPangular } from '../devframe.ts';
 import {
   capacitorState,
   expireCapacitorPages,
@@ -14,7 +14,8 @@ import {
 } from '../rpc/capacitor-tools.ts';
 import { answerText } from './tool-answer.ts';
 
-async function boot(definition = pangular) {
+// The demo project does not depend on @capacitor/core, so the tools are turned on here.
+async function boot(definition = createPangular({ inspectors: { capacitor: true } })) {
   const host = {
     mountStatic: () => {},
     resolveOrigin: () => 'http://localhost',
@@ -26,8 +27,8 @@ async function boot(definition = pangular) {
     ctx.rpc.invokeLocal(`pangular:${name}` as never, ...([payload] as never));
   const invoke = async (id: string, args: Record<string, unknown> = {}) =>
     await answerText(ctx.agent.invoke(`pangular:${id}`, args));
-  const tool = (args: Record<string, unknown> = {}) => invoke('list-capacitor-calls', args);
-  const plugins = (args: Record<string, unknown> = {}) => invoke('list-capacitor-plugins', args);
+  const tool = (args: Record<string, unknown> = {}) => invoke('capacitor-list-calls', args);
+  const plugins = (args: Record<string, unknown> = {}) => invoke('capacitor-list-plugins', args);
   const state = async () =>
     (
       await (
@@ -93,7 +94,7 @@ const report = (extra: Partial<CapacitorReport> = {}): CapacitorReport => ({
   ...extra,
 });
 
-describe('list-capacitor-calls', () => {
+describe('capacitor-list-calls', () => {
   it('says how to connect an app when none reports', async () => {
     const { tool } = await boot();
     expect(await tool()).toMatch(/No Capacitor app reports to this server/);
@@ -176,7 +177,9 @@ describe('list-capacitor-calls', () => {
   });
 
   it("masks a value stored under a key the server's secretNames name, in arguments and result", async () => {
-    const { push, tool } = await boot(createPangular({ redaction: { secretNames: ['voucher'] } }));
+    const { push, tool } = await boot(
+      createPangular({ inspectors: { capacitor: true }, redaction: { secretNames: ['voucher'] } }),
+    );
     await push(
       'push-capacitor',
       report({
@@ -226,7 +229,9 @@ describe('list-capacitor-calls', () => {
   });
 
   it("masks secrets with the server's own redaction, even when the page did not", async () => {
-    const { push, tool } = await boot(createPangular({ redaction: { secretNames: ['voucher'] } }));
+    const { push, tool } = await boot(
+      createPangular({ inspectors: { capacitor: true }, redaction: { secretNames: ['voucher'] } }),
+    );
     await push(
       'push-capacitor',
       report({ calls: [call(1, { args: { voucher: 'SAVE-50', quality: 90 } })] }),
@@ -238,7 +243,7 @@ describe('list-capacitor-calls', () => {
 
   it("keeps each listener's last event, masked again with the server's redaction", async () => {
     const { push, tool, state } = await boot(
-      createPangular({ redaction: { secretNames: ['voucher'] } }),
+      createPangular({ inspectors: { capacitor: true }, redaction: { secretNames: ['voucher'] } }),
     );
     await push(
       'push-capacitor',
@@ -323,14 +328,14 @@ describe('list-capacitor-calls', () => {
   it('is gone with the inspector turned off', async () => {
     const { ctx } = await boot(createPangular({ inspectors: { capacitor: false } }));
     const tools = ctx.agent.list().tools.map((entry: { id: string }) => entry.id);
-    expect(tools).not.toContain('pangular:list-capacitor-calls');
+    expect(tools).not.toContain('pangular:capacitor-list-calls');
     await expect(
       ctx.rpc.invokeLocal('pangular:push-capacitor' as never, ...([report()] as never)),
     ).rejects.toThrow();
   });
 });
 
-describe('list-capacitor-plugins', () => {
+describe('capacitor-list-plugins', () => {
   it('lists the environment and each plugin with hints', async () => {
     const { push, plugins } = await boot();
     await push('push-capacitor', report());
@@ -386,7 +391,7 @@ describe('list-capacitor-plugins', () => {
   it('is gone with the inspector turned off', async () => {
     const { ctx } = await boot(createPangular({ inspectors: { capacitor: false } }));
     const tools = ctx.agent.list().tools.map((entry: { id: string }) => entry.id);
-    expect(tools).not.toContain('pangular:list-capacitor-plugins');
+    expect(tools).not.toContain('pangular:capacitor-list-plugins');
   });
 });
 

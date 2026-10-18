@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import type { DevframeRpcClient } from 'devframe/client';
 import type { PluginView } from '@pangular-inspector/devtools/plugin';
-import { pluginSwitches } from '@pangular-inspector/devtools/config';
+import { pluginSwitches } from '@pangular-inspector/devtools/internal/config';
 import { panelConfig } from '../devtools-config';
 import { hostPageId } from '../page-id';
 import { Select, type SelectOption } from '../ui/select';
@@ -213,7 +213,7 @@ const STATUS_TONE: Record<PanelPluginEntry['status'], string> = {
             <div class="empty">
               <p>No row or item matches “{{ filter().trim() }}”.</p>
               <button type="button" class="small" (click)="filter.set(''); search.focus()">
-                Clear filter
+                Clear filters
               </button>
             </div>
           } @else {
@@ -299,7 +299,7 @@ const STATUS_TONE: Record<PanelPluginEntry['status'], string> = {
       height: var(--control-h);
       max-width: 100%;
       padding: 0 12px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--control-border);
       border-radius: var(--radius-sm);
       background: var(--surface);
       color: var(--text);
@@ -342,7 +342,7 @@ const STATUS_TONE: Record<PanelPluginEntry['status'], string> = {
       height: var(--control-h);
       padding: 0 12px 0 34px;
       background: var(--bg);
-      border: 1px solid var(--border-strong);
+      border: 1px solid var(--control-border);
       border-radius: var(--radius-sm);
       color: var(--text);
       font-size: 13px;
@@ -435,7 +435,7 @@ const STATUS_TONE: Record<PanelPluginEntry['status'], string> = {
     .small {
       height: var(--control-h);
       padding: 0 12px;
-      border: 1px solid var(--border-strong);
+      border: 1px solid var(--control-border);
       border-radius: var(--radius-sm);
       background: var(--surface-2);
       color: var(--text);

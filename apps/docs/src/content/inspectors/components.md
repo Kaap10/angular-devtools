@@ -115,7 +115,7 @@ The page reads nested values through own data properties only, so a getter never
 
 The field above **Inputs** filters the inputs, outputs, properties and directive inputs of the selected component by name. It also matches the keys of the nested levels already loaded, and opens the levels that lead to a match. It does not ask the page for levels you haven't opened.
 
-While you filter, the field counts the values that match, like **2 of 14**, and hides the blocks with no match. When nothing matches, **Clear filter** clears the field and moves focus back to it. Press Escape in the field to clear it. The filter stays when you select another component.
+While you filter, the field counts the values that match, like **2 of 14**, and hides the blocks with no match. When nothing matches, **Clear filters** clears the field and moves focus back to it. Press Escape in the field to clear it. The filter stays when you select another component.
 
 ### Editing values
 
@@ -176,7 +176,7 @@ The list needs Angular 22.0 or later in a development build. On an older Angular
 
 ### Change detection
 
-Below the tree and the defer blocks, the **Change detection** section records change detection cycles with Angular's profiler. Click **Record**, use the app, then click **Stop recording**. **Clear** empties the recording. Each new recording starts empty, but a start sent while the page records, such as an agent's `record: "start"`, keeps the cycles recorded so far.
+Below the tree and the defer blocks, the **Change detection** section records change detection cycles with Angular's profiler. Click **Record**, use the app, then click **Stop recording**. A check is a component whose template Angular ran. A clean OnPush component that Angular only walked past is not a check, and neither is the second pass that development builds run to catch `ExpressionChangedAfterItHasBeenChecked` errors. The flash overlay and the Performance panel track count the same way. **Clear** empties the recording. Each new recording starts empty, but a start sent while the page records, such as an agent's `record: "start"`, keeps the cycles recorded so far.
 
 - **Cycles**: a bar chart with one bar per recorded cycle, its height the cycle's duration. A line marks the 16.6 ms frame budget (one frame at 60 frames per second). A cycle over the budget has a striped bar, a triangle under it, and says "over budget" in its tooltip and in the table. Hover or focus a bar to see the cycle number, duration, output trigger, checks and its three slowest components.
 - **Spans in the picked cycles**: when the page reports timed spans, a flame graph of the picked cycles. Time runs left to right, cycle after cycle with the idle time between them left out, and a span nested in another sits one row lower. Each span is a component check (solid), a lifecycle hook (stripes), an `afterRender` callback (dots) or the output listener that triggered the cycle (lines, drawn before the cycle's start), with a key under the graph. Hover or focus a span to read its total and self time. The arrow keys move along a row, **Up** goes to the enclosing span and **Down** to the first nested one. **Enter** or a click on a component, hook or output selects that component in the tree. **Show the spans as a table** lists the same spans. The graph shows at most 30 cycles; pick a smaller range when more are picked.
@@ -277,7 +277,7 @@ Subscription tracking is off by default. **Track subscriptions** turns it on for
 
 A subscription is flagged when it is still open and either its instance was destroyed, or no instance of its class is left on the page and one was destroyed after it opened. Fix it with `takeUntilDestroyed()`, `DestroyRef.onDestroy` or the `async` pipe.
 
-**Stop tracking subscriptions** puts `subscribe` back. Subscriptions made before tracking started are not seen, so reload the page or go to the screen again after you start. Tracking stays on across a reload of the tab. The [`track-subscriptions`](../agents/tools.md#track-subscriptions) tool is the same switch.
+Press **Track subscriptions** again to put `subscribe` back. Subscriptions made before tracking started are not seen, so reload the page or go to the screen again after you start. Tracking stays on across a reload of the tab. The [`track-subscriptions`](../agents/tools.md#track-subscriptions) tool is the same switch.
 
 ### Source mode
 
@@ -443,19 +443,19 @@ Use the arrow keys, Home and End to move through the tree. The right arrow expan
 
 After **Collapse all**, the row you return to with Tab is the closest visible parent of the row you were on.
 
-Press Escape in the filter box to clear it. When the filter matches nothing, **Clear filter** clears it and moves focus back to the filter box.
+Press Escape in the filter box to clear it. When the filter matches nothing, **Clear filters** clears it and moves focus back to the filter box.
 
 ## Agent tools
 
 | Tool or resource                     | Kind     | What it does                                                                                                                                                                                                                                    |
 | ------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pangular:get-components`            | tool     | Lists components and directives from source, with selector, kind, inputs, outputs, change detection, file and line.                                                                                                                             |
+| `pangular:scan-components`           | tool     | Lists components and directives from source, with selector, kind, inputs, outputs, change detection, file and line.                                                                                                                             |
 | `pangular:highlight`                 | tool     | Highlights a component in the page and selects it. Takes an instance id, class name, host tag or CSS selector. Also retargets the Signals graph. Lists every instance a name matches.                                                           |
 | `pangular:inspect-component`         | tool     | Selects one instance and returns its live detail: inputs, outputs, properties, listeners, directives and injected services. With `path`, reads one nested value instead, with `depth` and `limit`.                                              |
 | `pangular:list-components`           | tool     | Returns the live tree of one page as an indented outline with routed, directive host and hydration markers. Takes a `filter` with the search syntax, a `depth` and `directiveHosts`.                                                            |
 | `pangular:defer-blocks`              | tool     | Lists the `@defer` blocks of each page, and flags blocks that failed, blocks stuck on their placeholder and blocks still dehydrated.                                                                                                            |
 | `pangular:for-blocks`                | tool     | Lists the `@for` blocks of each page with their item count, track kind and `@empty` block.                                                                                                                                                      |
-| `pangular:lint-templates`            | tool     | Lints component templates in source with the project's Angular template parser: parse errors, `@for` tracking objects by `$index`, `<img>` without `alt`, `(click)` without a key handler, `*ngIf`-style directives and `ngClass` or `ngStyle`. |
+| `pangular:scan-templates`            | tool     | Lints component templates in source with the project's Angular template parser: parse errors, `@for` tracking objects by `$index`, `<img>` without `alt`, `(click)` without a key handler, `*ngIf`-style directives and `ngClass` or `ngStyle`. |
 | `pangular:hydration`                 | tool     | Returns the hydration status of each page rendered on the server, and turns the outline on the page on or off. Turning the outline on or off is an action.                                                                                      |
 | `pangular:change-detection`          | tool     | Starts, stops or clears a change detection recording, turns the live views on or off, and returns the slowest and most often checked components, hook, output and afterRender time, the latest cycles, or an export.                            |
 | `pangular:diagnose-change-detection` | tool     | What started the recorded cycles, components that depend on zone.js, wasted checks, inputs that break OnPush, and OnPush hints.                                                                                                                 |

@@ -94,6 +94,11 @@ function ancestors(
   return out;
 }
 
+/** Whether an injector on the path provides a signal store the server could not name. */
+function anonymousStores(nodes: ({ providers: { token: string }[] } | undefined)[]): boolean {
+  return nodes.some((node) => node?.providers.some((p) => /^SignalStore\d*$/.test(p.token)));
+}
+
 const loose = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
 
 function matches(node: InjectorTreeNode, selector: string): boolean {
@@ -131,11 +136,11 @@ export function explainInjection(
   if (!selector || !token) {
     return {
       error:
-        'Pass `selector` (the component or element that injects, or an environment injector name such as Root) and `token` (the service class or InjectionToken name).',
+        'Pass `injector` (the component or element that injects, or an environment injector name such as Root) and `token` (the service class or InjectionToken name).',
     };
   }
   if (selector.length > MAX_ARG_CHARS || token.length > MAX_ARG_CHARS) {
-    return { error: `\`selector\` and \`token\` take at most ${MAX_ARG_CHARS} characters each.` };
+    return { error: `\`injector\` and \`token\` take at most ${MAX_ARG_CHARS} characters each.` };
   }
   const elements = flatten(page.roots);
   const environments = flatten(page.environment);
@@ -356,7 +361,9 @@ export function explainInjection(
         ? `No injector Angular asks${flagText} provides ${code(token)}; \`optional\` makes the injection return null.`
         : outcome === 'unknown'
           ? `Whether ${code(token)} resolves from ${code(startName)} can't be told: the page's Angular doesn't list providers (16.2 and later do).`
-          : `No injector Angular asks${flagText} provides ${code(token)}, so injecting it from ${code(startName)} throws NG0201 (NullInjectorError).`;
+          : anonymousStores(steps.map((step) => byId.get(step.id)))
+            ? `No injector Angular asks${flagText} lists ${code(token)} by that name, but some provide an @ngrx/signals store not yet named (\`SignalStore\`), so ${code(token)} may be one of them. If it is not, injecting it from ${code(startName)} throws NG0201 (NullInjectorError).`
+            : `No injector Angular asks${flagText} provides ${code(token)}, so injecting it from ${code(startName)} throws NG0201 (NullInjectorError).`;
   return {
     pageId: page.pageId,
     token,
@@ -401,7 +408,7 @@ export function explainInjectionText(result: InjectionExplanation | { error: str
       ? "The page's Angular has no `ɵgetInjectorResolutionPath` (16.2 and later), so this path is rebuilt from the nesting of the injector tree: element ancestors as rendered, then the root's environment injectors. Projected content resolves from where it is declared, so its real path can differ."
       : '',
     result.alsoMatched?.length
-      ? `The selector matched ${result.alsoMatched.length + 1} injectors; this is the first. Others: ${result.alsoMatched.map(code).join(', ')}.`
+      ? `\`injector\` matched ${result.alsoMatched.length + 1} injectors; this is the first. Others: ${result.alsoMatched.map(code).join(', ')}.`
       : '',
   ].filter(Boolean);
   return untrusted(
@@ -419,14 +426,14 @@ export function explainInjectionText(result: InjectionExplanation | { error: str
 }
 
 export const EXPLAIN_INJECTION_DESCRIPTION =
-  "How Angular resolves `token` for `selector` (a component, element or environment injector) at run time: each injector on the lookup path in order, up to the platform and the null injector, whether it provides the token and why the lookup stops. Honours `self`, `skipSelf`, `host` and `optional`, and notes tokens hidden in `viewProviders`. For NG0201 / NullInjectorError, pass the component and token from pangular:explain-error. Reads the reported injector tree, so nothing is created; a `providedIn: 'root'` service counts once something got it. Uses `page` or the most recent page.";
+  'How Angular resolves `token` for `injector`: each injector on the lookup path and why the lookup stops, honouring `self`, `skipSelf`, `host` and `optional`. For NG0201 pass the component and token from explain-error.';
 
 const FLAG_SCHEMA = (text: string) => ({ type: 'boolean', description: text }) as const;
 
 export const EXPLAIN_INJECTION_SCHEMA = {
   type: 'object',
   properties: {
-    selector: {
+    injector: {
       type: 'string',
       description:
         'Where the injection happens: a component or directive class name (CardComponent), a tag (app-card), a component id from the component tree or an error owner (c12), an injector id, or an environment injector name (Root, Route: admin) for a service. At most 500 characters.',
@@ -445,10 +452,10 @@ export const EXPLAIN_INJECTION_SCHEMA = {
     page: {
       type: 'string',
       description:
-        'Page id, when more than one tab reports (see pangular:list-pages). Defaults to the most recent.',
+        'Page id, when more than one tab reports (see pangular:list-pages). Defaults to its first row.',
     },
   },
-  required: ['selector', 'token'],
+  required: ['injector', 'token'],
 } as const;
 
 /** The arguments of the RPC function and the agent tool, checked. */
@@ -462,6 +469,13 @@ export function injectionArgs(raw: unknown): ExplainInjectionArgs & { page?: str
     ...(page ? { page } : {}),
     ...Object.fromEntries(FLAG_NAMES.filter((flag) => args[flag] === true).map((f) => [f, true])),
   };
+}
+
+/** The lookup flags an agent call set. */
+function flagsOf(raw: Record<string, unknown> | undefined): Record<string, true> {
+  return Object.fromEntries(
+    FLAG_NAMES.filter((flag) => raw?.[flag] === true).map((f) => [f, true]),
+  );
 }
 
 // Typed loosely like `errors-register.ts`, so devframe's own definitions fit.
@@ -496,6 +510,16 @@ export function registerInjectionExplain(host: InjectionExplainHost): void {
     title: 'Explain an injection',
     description: EXPLAIN_INJECTION_DESCRIPTION,
     inputSchema: EXPLAIN_INJECTION_SCHEMA,
-    handler: async (raw: unknown) => ({ markdown: explainInjectionText(run(raw)) }),
+    // The agent names the start `injector`; the panel's RPC call names it `selector`.
+    handler: async (raw: Record<string, unknown>) => ({
+      markdown: explainInjectionText(
+        run({
+          token: raw?.['token'],
+          page: raw?.['page'],
+          ...flagsOf(raw),
+          selector: raw?.['injector'],
+        }),
+      ),
+    }),
   });
 }

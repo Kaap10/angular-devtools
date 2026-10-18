@@ -13,7 +13,7 @@ This page takes one path: an *Angular CLI app with SSR, run with `ng serve`. Fou
 
 ## Before you start
 
-You need an Angular CLI app with SSR, on Angular 20 or later, and Node.js 22.12 or later. Angular 22.2 itself needs Node.js 22.22.3 or later. An SSR app has a `src/server.ts`. To create one, run `ng new my-app --ssr`.
+You need an Angular CLI app with SSR, on Angular 20, 21 or 22, and Node.js 22.12 or later. Angular 22.2 itself needs Node.js 22.22.3 or later. An SSR app has a `src/server.ts`. To create one, run `ng new my-app --ssr`.
 
 <ngmd-callout type="info" title="No server.ts?">
   A client-only app has no server to mount the devtools in. Follow <a href="./installation.md#client-only-angular-cli-app">Client-only Angular CLI app</a> instead.
@@ -64,7 +64,7 @@ const devtools = initPangularHub({ws: false});
 app.use(devtools.nodeMiddleware);
 ```
 
-Leave the rest of the file as it is. `ws: false` connects the browser over server-sent events on the same port, which works under `ng serve`. When `NODE_ENV` is `production`, the hub is off and the middleware only calls `next()`.
+Leave the rest of the file as it is. `ws: false` connects the browser over server-sent events on the same port, which works under `ng serve`. When `NODE_ENV` is `production`, or in a production build, the hub is off and the middleware only calls `next()`.
 
 ## Load the overlay
 

@@ -73,7 +73,7 @@ The floating button the overlay adds to the page, and the panel it opens in a fr
 _Avoid_: launcher, widget, modal
 
 **Tab**:
-One view in the panel, such as Components or Router. Most tabs belong to one inspector; the Dashboard summarises all of them.
+One view in the panel, such as Components or Routes. Most tabs belong to one inspector; the Dashboard summarises all of them.
 _Avoid_: page (a page is a browser tab), screen
 
 **RPC function**:
@@ -93,7 +93,7 @@ An MCP prompt: a ready request for one workflow, such as `debug-error` or `fix-f
 _Avoid_: template, command, skill (a skill is a `SKILL.md` folder the agent reads)
 
 **Resource**:
-Live state an agent reads as JSON over MCP, such as `pangular:component-tree`. It holds what the connected pages reported, so it is empty when no page is connected. Each page-scoped resource also has a per-page resource template, `pangular://page/{pageId}/<name>`, that holds one page (`packages/devtools/src/agent-page-resources.ts`).
+Live state an agent reads as JSON over MCP, such as `pangular:component-tree`. It holds what the connected pages reported, so it is empty when no page is connected. Each page-scoped resource also has a per-page resource template, `pangular://pages/{pageId}/<name>`, that holds one page (`packages/devtools/src/agent-page-resources.ts`).
 _Avoid_: snapshot, feed, state dump
 
 **Source scan**:
@@ -109,7 +109,7 @@ Masking values before they reach the panel or an agent: field names that look se
 _Avoid_: sanitizing, scrubbing, hiding
 
 **One-time code**:
-The code the server prints in the terminal, which a browser exchanges before it can read any data. It is on by default for the Express hub and turned on by the Vite plugin when a non-loopback host or origin is allowed. `auth: false` turns it off.
+The code the server prints in the terminal, which a browser exchanges before it can read any data. It is on by default for the Express hub and the Vite plugin. `auth: false` turns it off.
 _Avoid_: token (the MCP endpoint's bearer token is a different thing), password, PIN
 
 **Lint**:

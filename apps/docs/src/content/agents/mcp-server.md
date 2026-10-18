@@ -37,19 +37,19 @@ Run `pangular mcp --print-config` in your project folder. It prints the config f
 npx @pangular-inspector/devtools mcp --print-config --port 4000 --base /__devframes/
 ```
 
-| Flag            | Effect on the output                                                                                        |
-| --------------- | ----------------------------------------------------------------------------------------------------------- |
-| `--root <dir>`  | The project folder in the stdio config, as an absolute path. The default is the working directory.          |
-| `--host <host>` | Host in the HTTP URL and the `Origin` header. The default is `localhost`.                                   |
-| `--port <port>` | Port in the HTTP URL. The default is 9999, the [standalone CLI](../getting-started/cli.md).                 |
-| `--base <path>` | The hub base, such as `/__devframes/`. The URL becomes `<base>__mcp` and the config sends the bearer token. |
-| `--https`       | The server is behind TLS. The URL and the `Origin` header use `https://`.                                   |
+| Flag            | Effect on the output                                                                               |
+| --------------- | -------------------------------------------------------------------------------------------------- |
+| `--root <dir>`  | The project folder in the stdio config, as an absolute path. The default is the working directory. |
+| `--host <host>` | Host in the HTTP URL and the `Origin` header. The default is `localhost`.                          |
+| `--port <port>` | Port in the HTTP URL. The default is 9999, the [standalone CLI](../getting-started/cli.md).        |
+| `--base <path>` | The hub base, such as `/__devframes/`. The URL becomes `<base>__mcp`.                              |
+| `--https`       | The server is behind TLS. The URL and the `Origin` header use `https://`.                          |
 
-`--config` and `--read-only` are added to the stdio command. The output never holds the token. It reads the token from `PANGULAR_MCP_TOKEN` (VS Code asks for it) and prints the `export` line that sets it from the [token file](#send-a-token). Without `--base`, the HTTP config targets the standalone CLI, which asks for no token.
+`--config` and `--read-only` are added to the stdio command. The output never holds the token. It reads the token from `PANGULAR_MCP_TOKEN` (VS Code asks for it) and prints the `export` line that sets it from the [token file](#send-a-token). The HTTP config always sends the bearer token. Without `--base`, it targets the standalone CLI, which asks for the same token.
 
 The stdio server is named `pangular` and the HTTP one `pangular-live`, so you can add both. Claude Code prefers a local server over a project server of the same name, so with one name the HTTP server would never load.
 
-With `--base` and a `--host` that is not a loopback address, such as `192.168.1.20`, the output starts the HTTP part with a warning: the URL is `http`, so the token travels in clear text on your network. Serve the hub over TLS and pass `--https`, or keep it to a network you trust. `localhost`, `127.0.0.1` and `::1` get no warning.
+With a `--host` that is not a loopback address, such as `192.168.1.20`, and no `--https`, the output starts the HTTP part with a warning: the URL is `http`, so the token travels in clear text on your network. Serve the hub over TLS and pass `--https`, or keep it to a network you trust. `localhost`, `127.0.0.1` and `::1` get no warning.
 
 ## Connect over stdio
 
@@ -57,12 +57,13 @@ The package ships a `pangular` binary. Its `mcp` command starts an MCP server on
 
 ### Add the stdio server to your client
 
+Claude Code takes a command. Cursor reads `.cursor/mcp.json` and VS Code reads `.vscode/mcp.json` in the workspace.
+
 ```bash group="stdio" name="Claude Code" active
 claude mcp add pangular -- npx @pangular-inspector/devtools mcp --root /path/to/your-app
 ```
 
 ```json group="stdio" name="Cursor"
-// .cursor/mcp.json
 {
   "mcpServers": {
     "pangular": {
@@ -74,7 +75,6 @@ claude mcp add pangular -- npx @pangular-inspector/devtools mcp --root /path/to/
 ```
 
 ```json group="stdio" name="VS Code"
-// .vscode/mcp.json
 {
   "servers": {
     "pangular": {
@@ -90,7 +90,7 @@ claude mcp add pangular -- npx @pangular-inspector/devtools mcp --root /path/to/
 
 The server scans the folder it starts in, and your client picks that folder. Some clients start servers in `/`. Pass `--root` with the root of your Angular or Analog project, the folder with `package.json` and `angular.json`, or set `PANGULAR_ROOT`. Cursor and VS Code expand `${workspaceFolder}` to the open folder.
 
-If the folder has no `angular.json` and no `package.json` that depends on `@angular/core`, the server prints a warning on stderr. Your client shows it in the MCP server log.
+If the folder has no `angular.json` and no `package.json` that depends on `@angular/core`, the server prints a warning on stderr, which your client shows in the MCP server log. The agent never reads that log, so every source tool also refuses with `isError: true` and names the folder, instead of answering an empty list.
 
 ### Configure the stdio server
 
@@ -102,9 +102,9 @@ The stdio server reads the [devtools options](../getting-started/configuration.m
 
 ### What stdio can answer
 
-Over stdio, the source scan tools work: `get-routes`, `get-components`, `get-signals`, `get-providers`, `get-ngrx-store`, `get-pipes` and `build-meta`. So do the tools that read files only, like `lint-pipes`, `explain-pipe`, `explain-render-mode`, `analog-routes` and `analog-lint`.
+Over stdio, the source scan tools work: `scan-routes`, `scan-components`, `scan-signals`, `scan-providers`, `ngrx-scan`, `scan-pipes` and `scan-build`. So do the tools that read files only, like `scan-pipe-usage`, `explain-pipe`, `scan-render-mode`, `analog-scan-routes` and `analog-lint`.
 
-The stdio server leaves out the tools and resources that need the running app, such as `highlight`, `navigate`, `form-action`, `fill-form`, the forms and router tools, `analog-current-page`, `analog-server-calls` and `analog-call-api`. Use HTTP for those.
+The stdio server leaves out the tools and resources that need the running app, such as `highlight`, `navigate`, `run-form-action`, `fill-form`, the forms and router tools, `analog-inspect-page`, `analog-list-server-calls` and `analog-run-api`. Use HTTP for those.
 
 ## Connect over HTTP
 
@@ -140,6 +140,7 @@ If the hub asks for the one-time code, the HTTP endpoint also asks for a bearer 
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | [Express hub](../getting-started/express.md) | Yes, unless you pass `auth: false` or your own `mcp` option.                                           |
 | [Vite plugin](../getting-started/vite.md)    | Yes, unless you pass `auth: false`. See the plugin's [`auth` option](../getting-started/vite.md#auth). |
+| [Standalone CLI](../getting-started/cli.md)  | Yes, unless you pass `--no-auth`.                                                                      |
 
 The hub writes a generated token to `~/.pangular-inspector/mcp-token` when it first starts, with mode `0600` so only your user can read it. It prints the path of that file, never the token. Later starts read the same file, so the token stays the same across restarts and across projects. Read it from your client, for example with `cat ~/.pangular-inspector/mcp-token`.
 
@@ -156,8 +157,9 @@ The stdio server never needs a token.
 
 ### Add the HTTP endpoint to your client
 
+Claude Code reads `.mcp.json`, Cursor reads `.cursor/mcp.json` and VS Code reads `.vscode/mcp.json` in the workspace.
+
 ```json group="http" name="Claude Code" active
-// .mcp.json
 {
   "mcpServers": {
     "pangular-live": {
@@ -173,7 +175,6 @@ The stdio server never needs a token.
 ```
 
 ```json group="http" name="Cursor"
-// .cursor/mcp.json
 {
   "mcpServers": {
     "pangular-live": {
@@ -188,7 +189,6 @@ The stdio server never needs a token.
 ```
 
 ```json group="http" name="VS Code"
-// .vscode/mcp.json
 {
   "inputs": [
     {
@@ -225,7 +225,7 @@ The live tools read what the page reports. Without an open page, they have nothi
     Load the app with the <a href="../getting-started/overlay.md">overlay</a>. The page connects to the devtools and starts reporting.
   </ngmd-step>
   <ngmd-step title="Call a tool">
-    Ask your agent something the page knows, like "why is the checkout form invalid?". It calls <code>explain-form-invalid</code> on the connected page.
+    Ask your agent something the page knows, like "why is the checkout form invalid?". It calls <code>explain-invalid-forms</code> on the connected page.
   </ngmd-step>
 </ngmd-workflow>
 
@@ -245,13 +245,13 @@ The stdio server sends none. The HTTP endpoint needs devframe to pass the instru
 
 The HTTP endpoint also offers *MCP prompts: ready requests for the workflows in the [agent skills](./skills.md). Clients that support prompts usually show them as slash commands. Each prompt has one optional argument and returns a single user message with numbered steps that name the tools to call.
 
-| Prompt             | Argument      | What it asks the agent to do                                                                                      | Needs                      |
-| ------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `inspect-page`     | `page`        | Call `list-pages`, then `snapshot`, and summarize the route, components, errors, HTTP calls and forms.            | Always offered             |
-| `debug-error`      | `error`       | Find the error with `list-errors`, explain it with `explain-error`, fix the cause and check it stops.             | `errors` on for agents     |
-| `fix-form`         | `form`        | Explain the form with `explain-form-invalid`, keep a `form-history` marker, fix it and prove it with `form-diff`. | `forms` on for agents      |
-| `performance-pass` | `interaction` | Record change detection, read `change-detection` and `diagnose-change-detection`, fix one thing and compare.      | `components` on for agents |
-| `verify-fix`       | `fix`         | Repeat the calls that showed the problem, compare the answers and check `list-errors` for new errors.             | Always offered             |
+| Prompt             | Argument      | What it asks the agent to do                                                                                                       | Needs                      |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `inspect-page`     | `page`        | Call `list-pages`, then `snapshot`, and summarize the route, components, errors, HTTP calls and forms.                             | Always offered             |
+| `debug-error`      | `error`       | Find the error with `list-errors`, explain it with `explain-error`, fix the cause and check it stops.                              | `errors` on for agents     |
+| `fix-form`         | `form`        | Explain the form with `explain-invalid-forms`, keep a `list-form-changes` marker, fix it and prove it with `explain-form-changes`. | `forms` on for agents      |
+| `performance-pass` | `interaction` | Record change detection, read `change-detection` and `diagnose-change-detection`, fix one thing and compare.                       | `components` on for agents |
+| `verify-fix`       | `fix`         | Repeat the calls that showed the problem, compare the answers and check `list-errors` for new errors.                              | Always offered             |
 
 The prompts follow the same config as the tools. A prompt is left out when a tool it needs is off through `inspectors` or `agent.tools`, and its steps leave out the tools that are off. Under `agent.readOnly` or with `actions.forms` off, `fix-form` names no action tool. Under `agent.readOnly`, `performance-pass` asks you to start the recording from the panel.
 
@@ -261,60 +261,51 @@ The stdio server offers no prompts. Like the instructions, the prompts need a de
 
 ### Resource templates
 
-The HTTP endpoint also lists a resource template for each page-scoped resource, such as `pangular://page/{pageId}/component-tree`. When a page starts reporting or expires, it sends `notifications/resources/list_changed` to clients that listen through `subscriptions/listen` (the 2026-07-28 protocol). A client on an older protocol version, such as the MCP SDK 1.x defaults, gets no notification and lists the resources again to see new pages. See [Read one page](./resources.md#read-one-page) and [List changes](./resources.md#list-changes).
+The HTTP endpoint also lists a resource template for each page-scoped resource, such as `pangular://pages/{pageId}/component-tree`. When a page starts reporting or expires, it sends `notifications/resources/list_changed` to clients that listen through `subscriptions/listen` (the 2026-07-28 protocol). A client on an older protocol version, such as the MCP SDK 1.x defaults, gets no notification and lists the resources again to see new pages. See [Read one page](./resources.md#read-one-page) and [List changes](./resources.md#list-changes).
 
 ### Tool names
 
-The server registers tools with a colon, as `pangular:get-routes`. MCP clients see them with an underscore, as `pangular_get-routes`. Calls with either form work.
+The server registers tools with a colon, as `pangular:scan-routes`. MCP clients see them with an underscore, as `pangular_scan-routes`. Calls with either form work.
 
-### Titles and structured output
+### Titles and answers
 
 Each tool also has a short title, such as **List connected pages** for `pangular_list-pages`. The server sends it as the tool's `title` and `annotations.title`, and clients show it in their tool lists and approval prompts.
 
-A tool answers with a JSON object, sent as text. Most tools answer `{ "markdown": "..." }`. The tools below also declare an `outputSchema` and send the same object as `structuredContent`, so a client can read the answer without parsing the text. The text is the same either way.
-
-| Tools                                                                                                       | `structuredContent`            |
-| ----------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| Every tool whose name starts with `list-` or `inspect-`                                                     | `{ "markdown": "..." }`        |
-| `analog-routes`, `analog-api-routes`, `analog-server-functions`, `analog-server-calls` and `analog-content` | `{ "markdown": "..." }`        |
-| `wait-for` and `lint-templates`                                                                             | `{ "markdown": "..." }`        |
-| `build-meta`                                                                                                | The project and version fields |
-| `snapshot`                                                                                                  | `{ "markdown": "..." }`        |
-
-The other source scan tools answer with a JSON array, and `screenshot-component` with an image, so they send text and images only.
+Every tool answers with one plain text block, the answer as written: markdown for the live tools, and compact JSON for the source scans (`scan-*` and `ngrx-scan`). No tool declares an `outputSchema`, so no answer comes with `structuredContent`. `screenshot-component` adds an image block after its text. A refusal is one text block with `isError: true`.
 
 ### Read and action tools
 
-Each tool has a safety tier: `read`, `action` or `destructive`. The server marks `read` tools as read-only for your client, and `destructive` tools as destructive. Twenty tools act on the app, so the server does not mark them read-only:
+Each tool has a safety tier: `read`, `action` or `destructive`. The server marks `read` tools as read-only for your client, and `destructive` tools as destructive. Twenty-one tools act on the app, so the server does not mark them read-only:
 
-| Tool                     | Tier          | Reference                                                                     |
-| ------------------------ | ------------- | ----------------------------------------------------------------------------- |
-| `navigate`               | `action`      | [Act on the router](./tools.md#act-on-the-router)                             |
-| `dispatch-ngrx-action`   | `action`      | [Dispatch an action](./tools.md#dispatch-an-action)                           |
-| `restore-ngrx-state`     | `action`      | [Restore a state](./tools.md#restore-a-state)                                 |
-| `query-action`           | `action`      | [Invalidate or refetch a query](./tools.md#invalidate-or-refetch-a-query)     |
-| `form-action`            | `action`      | [Act on a form](./tools.md#act-on-a-form)                                     |
-| `fill-form`              | `action`      | [Act on a form](./tools.md#act-on-a-form)                                     |
-| `set-http-rule`          | `action`      | [Fault rules](./tools.md#fault-rules)                                         |
-| `remove-http-rule`       | `action`      | [Fault rules](./tools.md#fault-rules)                                         |
-| `set-ssr-override`       | `action`      | [TransferState and SSR overrides](./tools.md#transferstate-and-ssr-overrides) |
-| `remove-ssr-override`    | `action`      | [TransferState and SSR overrides](./tools.md#transferstate-and-ssr-overrides) |
-| `set-component-property` | `action`      | [Edit a component](./tools.md#edit-a-component)                               |
-| `set-signal`             | `action`      | [Edit a component](./tools.md#edit-a-component)                               |
-| `watch-signal`           | `action`      | [watch-signal](./tools.md#watch-signal)                                       |
-| `record-pipes`           | `action`      | [Record pipe calls](./tools.md#record-pipe-calls)                             |
-| `track-subscriptions`    | `action`      | [Track subscriptions](./tools.md#track-subscriptions)                         |
-| `change-detection`       | `action`      | [change-detection](./tools.md#change-detection)                               |
-| `hydration`              | `action`      | [hydration](./tools.md#hydration)                                             |
-| `audit`                  | `action`      | [audit](./tools.md#audit)                                                     |
-| `clear-recordings`       | `destructive` | [Clear recordings](./tools.md#clear-recordings)                               |
-| `analog-call-api`        | `destructive` | [Call a server route](./tools.md#call-a-server-route)                         |
+| Tool                      | Tier          | Reference                                                                     |
+| ------------------------- | ------------- | ----------------------------------------------------------------------------- |
+| `navigate`                | `action`      | [Act on the router](./tools.md#act-on-the-router)                             |
+| `probe-route`             | `action`      | [Act on the router](./tools.md#act-on-the-router)                             |
+| `record-guards`           | `action`      | [Act on the router](./tools.md#act-on-the-router)                             |
+| `ngrx-dispatch`           | `action`      | [Dispatch an action](./tools.md#dispatch-an-action)                           |
+| `ngrx-restore`            | `action`      | [Restore a state](./tools.md#restore-a-state)                                 |
+| `tanstack-run-query`      | `action`      | [Invalidate or refetch a query](./tools.md#invalidate-or-refetch-a-query)     |
+| `run-form-action`         | `action`      | [Act on a form](./tools.md#act-on-a-form)                                     |
+| `fill-form`               | `action`      | [Act on a form](./tools.md#act-on-a-form)                                     |
+| `set-http-rule`           | `action`      | [Fault rules](./tools.md#fault-rules)                                         |
+| `remove-http-rule`        | `action`      | [Fault rules](./tools.md#fault-rules)                                         |
+| `set-ssr-override`        | `action`      | [TransferState and SSR overrides](./tools.md#transferstate-and-ssr-overrides) |
+| `remove-ssr-override`     | `action`      | [TransferState and SSR overrides](./tools.md#transferstate-and-ssr-overrides) |
+| `set-component-property`  | `action`      | [Edit a component](./tools.md#edit-a-component)                               |
+| `set-signal`              | `action`      | [Edit a component](./tools.md#edit-a-component)                               |
+| `watch-signal`            | `action`      | [watch-signal](./tools.md#watch-signal)                                       |
+| `record-pipes`            | `action`      | [Record pipe calls](./tools.md#record-pipe-calls)                             |
+| `track-subscriptions`     | `action`      | [Track subscriptions](./tools.md#track-subscriptions)                         |
+| `record-change-detection` | `action`      | [record-change-detection](./tools.md#record-change-detection)                 |
+| `audit`                   | `action`      | [audit](./tools.md#audit)                                                     |
+| `clear-recordings`        | `destructive` | [Clear recordings](./tools.md#clear-recordings)                               |
+| `analog-run-api`          | `destructive` | [Call a server route](./tools.md#call-a-server-route)                         |
 
-Your client can ask you before it runs them. To drop them from the server, set `agent.readOnly`, which keeps only the `read` tools. `change-detection` stays without its `record` argument, `hydration` without its `overlay` argument and `audit` without its `axe` argument, as `read` tools. See [Inspectors and agent tools](../getting-started/configuration.md#inspectors-and-agent-tools).
+Your client can ask you before it runs them. To drop them from the server, set `agent.readOnly`, which keeps only the `read` tools. `audit` stays without its `axe` argument, as a `read` tool. See [Inspectors and agent tools](../getting-started/configuration.md#inspectors-and-agent-tools).
 
 ### Pages and tabs
 
-Each browser tab reports on its own and gets a page id, and so does an [Angular Native](../getting-started/angular-native.md) or [NativeScript](../getting-started/nativescript.md) app. `list-pages` lists them with their platform. Most tools that read live data use the most recent page by default, and [Agent tools](./tools.md) names the ones that don't. Pass `page` to pick another tab (`inspect-providers`, `highlight`, `inspect-component` and `defer-blocks` also accept `pageId`). An id that no tab reports gets an answer that lists the tabs that do, instead of data from another tab. The server drops pages that stop reporting after a short time.
+Each browser tab reports on its own and gets a page id, and so does an [Angular Native](../getting-started/angular-native.md) or [NativeScript](../getting-started/nativescript.md) app. `list-pages` lists them with their platform. Without `page`, every tool that reads live data uses the same default page, the first row of `list-pages`, and names it in its answer. [The page argument](./tools.md#the-page-argument) gives the rule and the tools that pick a page another way. Pass `page` to pick another tab. An id that no tab reports gets an answer that lists the tabs that do, instead of data from another tab. The server drops pages that stop reporting after a short time.
 
 ## Where to next
 

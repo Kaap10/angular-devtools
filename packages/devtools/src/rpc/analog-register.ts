@@ -42,7 +42,6 @@ import {
 } from './analog-tools.ts';
 import type { PageOwners } from './page-owners.ts';
 import { fixedTtl, PAGE_TTL_MS, type PageTtl } from './page-ttl.ts';
-import { MARKDOWN_OUTPUT_SCHEMA } from './agent-output.ts';
 import { refusal } from './refusal.ts';
 
 type AnyRecord = Record<string, any>;
@@ -127,7 +126,7 @@ function namesProjectFile(root: string, path: string): boolean {
 }
 
 /**
- * Why `analog-call-api` refuses a path, or `undefined` when the path is an API route, an
+ * Why `analog-run-api` refuses a path, or `undefined` when the path is an API route, an
  * `/_analog` URL or a page of the app. Vite internals (`/@fs/`, `/@id/`), `?raw` and other
  * Vite query flags, and paths that name a project file are refused, so the tool can't read
  * source or files outside the app.
@@ -387,16 +386,15 @@ export async function registerAnalog(
   const text = (markdown: string) => ({ markdown });
 
   ctx.agent.registerTool({
-    id: 'pangular:analog-routes',
+    id: 'pangular:analog-scan-routes',
     title: 'List Analog routes',
-    outputSchema: MARKDOWN_OUTPUT_SCHEMA,
     description:
       'List the Analog file-based routes in match order: URL pattern, page or layout file, route groups, [param] and catch-all segments, sibling .server.ts (load/action), routeMeta keys and titles. Pass `filter` to narrow by path or file.',
     inputSchema: { type: 'object', properties: { filter: { type: 'string' } } },
     handler: async (args: { filter?: string }) => text(analogRoutesText(project(), args?.filter)),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-explain-url',
+    id: 'pangular:analog-scan-url',
     title: 'Explain an Analog URL',
     description:
       'Explain which Analog files render a URL (layout chain, page, .server.ts load and its endpoint), the params, or why nothing matches with the closest candidates.',
@@ -409,7 +407,7 @@ export async function registerAnalog(
       ),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-current-page',
+    id: 'pangular:analog-inspect-page',
     title: 'Show the current Analog page',
     description:
       'The Analog page open in the browser: its files (layouts first), load() data it received, server rendering and hydration state, hydration errors, and page files the running router does not know yet (restart needed).',
@@ -418,11 +416,10 @@ export async function registerAnalog(
       text(analogCurrentPageText(project(), current(), args?.page)),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-server-calls',
+    id: 'pangular:analog-list-server-calls',
     title: 'List Analog server calls',
-    outputSchema: MARKDOWN_OUTPUT_SCHEMA,
     description:
-      'Recent server calls seen by the dev server: page renders (with render mode), load() fetches (GET /_analog/pages), form action submissions (other methods on /_analog/pages, with success, redirect or validation error outcome), server functions by name (including reads that ran during server rendering, seen through their TransferState seed) and API routes, with status, time, size, who called (ssr or browser) and a redacted response preview. Flags load() fetched twice and seeded server function reads called again in the browser.',
+      'Recent Analog server calls: page renders, load() fetches, form actions, server functions and API routes, with status, time, size, caller and a masked preview. Flags load() fetched twice and server reads repeated in the browser.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -435,25 +432,23 @@ export async function registerAnalog(
       text(analogServerCallsText(current(), args ?? {}, project().serverFns)),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-server-functions',
+    id: 'pangular:analog-scan-server-functions',
     title: 'List Analog server functions',
-    outputSchema: MARKDOWN_OUTPUT_SCHEMA,
     description:
-      'List Analog server functions (serverFn exports in src/**/*.server.ts) with name, HTTP method, file and the id Analog routes them under (/_analog/fn/<id>), how often each was called over HTTP and during server rendering, and reads called again in the browser right after hydration. Empty when no .server.ts file exports serverFn.',
+      'Analog server functions (serverFn in *.server.ts): name, method, file, route id, call counts over HTTP and during SSR, and reads repeated after hydration.',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogServerFnsText(project(), current())),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-api-routes',
+    id: 'pangular:analog-scan-api-routes',
     title: 'List Analog API routes',
-    outputSchema: MARKDOWN_OUTPUT_SCHEMA,
     description:
       'List Analog/Nitro server routes under src/server/routes with method, URL and file, plus server middleware.',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogApiRoutesText(project())),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-call-api',
+    id: 'pangular:analog-run-api',
     title: 'Call an Analog API route',
     description:
       'Send a request to a route on the running dev server (for example GET /api/v1/hello) and return status, time and body. Methods other than GET, HEAD and OPTIONS need confirm: true.',
@@ -489,15 +484,15 @@ export async function registerAnalog(
     },
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-render-modes',
+    id: 'pangular:analog-explain-render-modes',
     title: 'Show Analog render modes',
     description:
-      'For each Analog page: how it is rendered (server rendered per request, prerendered, cached, redirected or client only) with the routeRules entry, prerender.routes or build output that decides it, and what the last request to that page (including dynamic and catch-all URLs) actually did. Ends with a "Config read in part" note when vite.config builds analog() options from variables, spreads or other non-literals the scan cannot read.',
+      'How each Analog page is rendered (SSR, prerendered, cached, redirected or client only), the config that decides it, and what the last request did.',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => text(analogRenderModesText(project(), current())),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-prerender-plan',
+    id: 'pangular:analog-scan-prerender',
     title: 'Check the Analog prerender plan',
     description:
       'Compare prerender.routes with the page files and the build output: static pages left out, dynamic pages that need explicit entries, and listed routes missing from dist. Ends with a "Config read in part" note when vite.config could not be read in full.',
@@ -505,9 +500,8 @@ export async function registerAnalog(
     handler: async () => text(analogPrerenderText(project())),
   });
   ctx.agent.registerTool({
-    id: 'pangular:analog-content',
+    id: 'pangular:analog-scan-content',
     title: 'List Analog content files',
-    outputSchema: MARKDOWN_OUTPUT_SCHEMA,
     description:
       'List markdown content files with slug, frontmatter, the route that serves them and parse errors. Pass `filter` to narrow.',
     inputSchema: { type: 'object', properties: { filter: { type: 'string' } } },
@@ -517,7 +511,7 @@ export async function registerAnalog(
     id: 'pangular:analog-lint',
     title: 'Lint the Analog project',
     description:
-      'Analog checks: two files for one URL, sibling [param] files, missing default export, layout without router-outlet, .server.ts without load, action or server functions, or without a page, redirect mistakes, bad API method suffix, duplicate API routes, routes outside the API prefix, prerender entries that match nothing, partly read config, frontmatter errors, duplicate slugs, plus live problems (load fetched twice, seeded server function read called again, hydration errors, restart needed, API 404/405). Hydration errors and restart hints come from one page: `page`, or the most recent one.',
+      'Analog checks: conflicting page files, missing exports, layouts without router-outlet, server file mistakes, API route issues, prerender entries matching nothing, content frontmatter, plus live problems from the default page.',
     inputSchema: { type: 'object', properties: { page } },
     handler: async (args: { page?: string }) =>
       text(analogLintText(project(), current(), args?.page)),

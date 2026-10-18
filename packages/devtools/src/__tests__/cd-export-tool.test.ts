@@ -103,7 +103,7 @@ describe('change-detection export', () => {
     expect(JSON.stringify(trace)).not.toContain(JWT);
   });
 
-  it('stays a read in read-only mode and refuses export with record', async () => {
+  it('stays a read in read-only mode, where record is not an argument of the read', async () => {
     const { tool, call } = await boot({ agent: { readOnly: true } });
     expect(tool?.safety).toBe('read');
     const schema = tool?.inputSchema as { properties: Record<string, unknown> };
@@ -111,8 +111,9 @@ describe('change-detection export', () => {
     expect(await call({ export: 'json' })).toContain('```json');
 
     const full = await boot();
+    // `record` moved to record-change-detection, so the read refuses it and clears nothing.
     expect(await full.call({ export: 'json', record: 'clear' })).toBe(
-      'Pass either `record` or `export`, not both.',
+      'There is no `record` argument; use `pangular:record-change-detection`.',
     );
     expect(await full.call({ export: 'csv' })).toMatch(
       /^`export` must be one of `json`, `trace`, not a string \("csv"\)\./,

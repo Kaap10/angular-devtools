@@ -17,7 +17,7 @@ const ORIGINS = ['all', 'user', 'code', 'agent', 'devtools'] as const;
 /** How many events the list renders, newest first. */
 export const TIMELINE_SHOWN = 100;
 
-/** Event types in the order the `form-history` agent tool lists them. */
+/** Event types in the order the `list-form-changes` agent tool lists them. */
 const EVENT_TYPES = [
   'value',
   'status',
@@ -316,7 +316,7 @@ const EVENT_TYPES = [
       height: var(--control-h);
       padding: 0 12px 0 34px;
       background: var(--bg);
-      border: 1px solid var(--border-strong);
+      border: 1px solid var(--control-border);
       border-radius: var(--radius-sm);
       color: var(--text);
       font-size: 13px;

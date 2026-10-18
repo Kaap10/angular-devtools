@@ -128,10 +128,9 @@ The log starts when the overlay starts, unless the app loads the Capacitor hook 
 
 A call that a plugin's web implementation answers never reaches the native bridge, and neither does the **Not implemented** error that `@capacitor/core` raises for a method no platform implements. The tab sees these calls only when `@pangular-inspector/devtools/capacitor-hook` runs before `@capacitor/core`. On the web, without the hook, the tab says that calls aren't shown.
 
-Add the hook to the polyfills of your development configuration, so it loads before your app and stays out of production builds. A configuration's `polyfills` replace the list in the build's `options`, so copy that list and add the hook to it:
+Add the hook to the polyfills of your development configuration, so it loads before your app and stays out of production builds. A configuration's `polyfills` replace the list in the build's `options`, so copy that list and add the hook to it. In `angular.json` (excerpt):
 
 ```json
-// angular.json (excerpt)
 {
   "projects": {
     "my-app": {
@@ -175,8 +174,8 @@ The overlay leaves its own requests to the devtools server out of the log.
 
 | Tool                     | What it answers                                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `list-capacitor-calls`   | Recent plugin calls, with filters for a plugin, failed calls and slow calls, then the active listeners with their last event. |
-| `list-capacitor-plugins` | The environment and every plugin, with notes like the **Plugins** table.                                                      |
+| `capacitor-list-calls`   | Recent plugin calls, with filters for a plugin, failed calls and slow calls, then the active listeners with their last event. |
+| `capacitor-list-plugins` | The environment and every plugin, with notes like the **Plugins** table.                                                      |
 
 See [Tools](../agents/tools.md#capacitor) for their arguments.
 

@@ -4,6 +4,7 @@ import {
   forgetDevframeConnection,
   overlayConnectOptions,
   overlayReconnectOptions,
+  rememberBase,
   warnOnConnectionTrouble,
 } from './overlay-connection.ts';
 import { createOverlayLink, type LinkClient } from './overlay-link.ts';
@@ -105,6 +106,7 @@ import { COMPONENT_TREE_SHAPE, INJECTOR_TREE_SHAPE } from './push-delta.ts';
 import { createDomDirty } from './dom-dirty.ts';
 import { domTree } from './host-tree.ts';
 import { LEASED_PUSH_MS, createPageLease, throttle } from './page-lease.ts';
+import { setTimeoutOutside } from './outside-angular.ts';
 import { createPageHeartbeat, keepaliveAfter } from './page-heartbeat.ts';
 
 declare global {
@@ -303,6 +305,9 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
   if (!own(link.stop)) return;
   if (!own(warnOnConnectionTrouble(rpc, options))) return;
   const metaUrl = rpc.connection?.metaBaseUrl;
+  // The next load tries this base first, so it logs no 404 for the ones before it.
+  const pageUrl = (globalThis as { location?: { href?: string } }).location?.href;
+  if (!options.baseURL && pageUrl) rememberBase(DEFAULT_BASES, metaUrl, pageUrl);
   if (metaUrl) {
     void overlayPopup()
       ?.then((m) => m.useDevtoolsBase(new URL('.', metaUrl).href))
@@ -744,7 +749,7 @@ async function startOverlay(options: OverlayOptions, own: (cleanup: () => void) 
 
   function scheduleRouterPush() {
     clearTimeout(routerPushTimer);
-    routerPushTimer = setTimeout(() => void pushRouter(), 50);
+    routerPushTimer = setTimeoutOutside(() => void pushRouter(), 50);
   }
 
   // The leased reports go out at most once a second; forced pushes don't wait.

@@ -400,7 +400,9 @@ describe('devframe SSR requests', () => {
       ).value() as HttpState;
     const tool = (id: string, args: Record<string, unknown> = {}) =>
       ctx.agent.list().tools.some((t) => t.id === `pangular:${id}`)
-        ? (ctx.agent.invoke(`pangular:${id}`, args) as Promise<{ markdown: string }>)
+        ? (ctx.agent.invoke(`pangular:${id}`, args) as Promise<string>).then((markdown) => ({
+            markdown,
+          }))
         : undefined;
     const push = (payload: unknown) =>
       ctx.rpc.invokeLocal('pangular:push-http' as never, ...([payload] as never));
@@ -433,5 +435,42 @@ describe('devframe SSR requests', () => {
     const { tool } = await boot({ inspectors: { http: false } });
     expect(ssrRegistry().record).toBeUndefined();
     expect(tool('list-ssr-requests')).toBeUndefined();
+  });
+});
+
+describe('explain-ssr-request hydration line', () => {
+  it("uses Angular's own hydration counters over the DOM scan", async () => {
+    const { explainSsrRequestText } = await import('../rpc/ssr-tools.ts');
+    const hydration = {
+      enabled: true,
+      hydratedComponents: 5,
+      hydratedNodes: 181,
+      componentsSkippedHydration: 0,
+      nodes: { hydrated: 166, skipped: 2, mismatched: 0 },
+      mismatches: [],
+      skipHydrationHosts: [],
+      warnings: [],
+      warningsCaptured: true,
+    };
+    const text = explainSsrRequestText([ssrRequest()], [], [page({ hydration })], { id: 'r1' });
+    expect(text).toContain(
+      '- Hydration: 181 nodes in 5 components hydrated, 0 mismatched, 0 components skipped.',
+    );
+    const scanOnly = explainSsrRequestText(
+      [ssrRequest()],
+      [],
+      [
+        page({
+          hydration: {
+            ...hydration,
+            hydratedComponents: undefined,
+            hydratedNodes: undefined,
+            componentsSkippedHydration: undefined,
+          },
+        }),
+      ],
+      { id: 'r1' },
+    );
+    expect(scanOnly).toContain('- Hydration: 166 nodes hydrated, 0 mismatched, 2 nodes skipped.');
   });
 });

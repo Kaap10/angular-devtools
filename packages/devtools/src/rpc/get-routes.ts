@@ -36,11 +36,6 @@ export const getRoutes = defineRpcFunction({
   snapshot: true,
   args: [],
   returns: describable(v.array(RouteSchema)),
-  agent: {
-    description:
-      "List Angular routes extracted from route configuration files in the workspace, with each route's full URL path (parents and loadChildren prefixes included), kind (page, group, redirect or wildcard), guards, resolvers and file:line. Call before suggesting navigation changes or analyzing the app structure.",
-    title: 'List Angular routes',
-  },
   setup: (ctx) => ({
     handler: async () => extractRoutes(ctx.cwd),
   }),

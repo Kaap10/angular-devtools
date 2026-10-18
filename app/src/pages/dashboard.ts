@@ -12,7 +12,7 @@ import type { DevframeRpcClient } from 'devframe/client';
 import {
   summarizePangularConfig,
   type ResolvedPangularConfig,
-} from '@pangular-inspector/devtools/config';
+} from '@pangular-inspector/devtools/internal/config';
 import { hostPageId } from '../page-id';
 import { injectorTreeFor, signalGraphFor } from '../live-pages';
 import { pageOf } from './forms-types';
@@ -363,7 +363,7 @@ export function httpCard(state: HttpSnapshot | null, hostPageId: string | null):
       align-items: center;
       height: var(--control-h);
       padding: 0 14px;
-      border: 1px solid var(--border-strong);
+      border: 1px solid var(--control-border);
       border-radius: var(--radius-sm);
       background: var(--surface-2);
       color: var(--text);

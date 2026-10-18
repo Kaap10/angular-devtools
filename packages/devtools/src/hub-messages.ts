@@ -17,7 +17,7 @@ import { clip } from './text.ts';
 import type { HydrationStats } from './types.ts';
 
 /** The kinds of item the feed posts, as the message `category`. */
-/** Whether a `change-detection` call changes the page rather than only reading it. */
+/** Whether a `record-change-detection` call changes the page rather than only refusing. */
 function cdWrites(args: unknown): boolean {
   const call = (args ?? {}) as Record<string, unknown>;
   return (
@@ -111,7 +111,13 @@ const pageOf = (args: unknown) => {
 /** Lines that frame an answer instead of saying what happened: the untrusted-data notices, code fences and bare JSON brackets. */
 const FRAME_LINE = /^(?:_.*_|```[\w-]*|[[\]{}(),\s]*)$/;
 
-/** The lines of a tool's answer that say something, with headings and JSON keys made plain. */
+/**
+ * The line a live tool's answer starts with to name the page it read
+ * (`withPageLine` in rpc/page-read-scope.ts). The feed names the page itself.
+ */
+const PAGE_LINE = /^Page `[^`]*`(?: \(`[^`]*`\))?\.$/;
+
+/** The lines of a tool's answer that say something, with headings and JSON keys made plain; framing and page lines are left out. */
 function answerLines(result: unknown): string[] {
   const record = result as { markdown?: unknown } | null | undefined;
   const text =
@@ -123,7 +129,7 @@ function answerLines(result: unknown): string[] {
   return text
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line && !FRAME_LINE.test(line))
+    .filter((line) => line && !FRAME_LINE.test(line) && !PAGE_LINE.test(line))
     .map((line) =>
       line
         .replace(/^#+\s*/, '')
@@ -293,16 +299,9 @@ export function createHubFeed(
   const agentWrite = (id: string, safety: AgentSafety, args: unknown, result: unknown) => {
     const name = id.replace(/^pangular:/, '');
     if (safety === 'read' || !agentAllowed({ id }, config)) return;
-    // change-detection only writes when it starts, stops or clears a recording,
-    // or turns a live view on or off.
-    if (name === 'change-detection' && !cdWrites(args)) return;
-    // hydration only acts when it turns the overlay on or off.
-    if (
-      name === 'hydration' &&
-      typeof (args as { overlay?: unknown } | null)?.overlay !== 'boolean'
-    ) {
-      return;
-    }
+    // record-change-detection writes only when it starts, stops or clears a
+    // recording, or turns a live view on or off.
+    if (name === 'record-change-detection' && !cdWrites(args)) return;
     // audit only runs something in the page when it runs axe.
     if (name === 'audit' && (args as { axe?: unknown } | null)?.axe !== true) return;
     if (changedNothing(result)) return;

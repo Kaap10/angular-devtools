@@ -60,7 +60,7 @@ Most of the Dashboard reads your workspace, not the running page. It works befor
 
 The server reads versions from the installed packages in `node_modules`. When a package is not installed, it falls back to the range in `package.json`.
 
-The project name comes from `angular.json`. The devtools pick `defaultProject` when it is set, then the project whose `root` is the workspace folder, then the first `application` project. In an Nx workspace without `angular.json`, the name comes from `project.json`. When neither file names a project, it comes from `package.json`.
+The project name comes from `angular.json`. The devtools pick `defaultProject` when it is set, then the project whose `root` is the workspace folder, then the first `application` project. Without `angular.json`, the name comes from a `project.json` in the scanned folder, as in an Nx app folder passed with [`--root`](../getting-started/cli.md#nx-workspaces). When neither file names a project, it comes from `package.json`.
 
 ### SSR status
 
@@ -94,7 +94,7 @@ The Forms and SSR & HTTP cards read the live page only, and update while it runs
 
 | Tool                  | What it returns                                                                                        |
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `pangular:build-meta` | Angular and TypeScript versions, the project name, SSR status and, in Analog apps, the Analog version. |
+| `pangular:scan-build` | Angular and TypeScript versions, the project name, SSR status and, in Analog apps, the Analog version. |
 
 [Static reports](../getting-started/cli.md) include the same data. See [Tools](../agents/tools.md) for every tool.
 

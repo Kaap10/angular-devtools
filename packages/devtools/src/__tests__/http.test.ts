@@ -24,12 +24,8 @@ import { angularAtLeast } from './angular-version.ts';
 
 /** `@pangular-inspector/devtools/http` imports `REQUEST` and `provideEnvironmentInitializer`, which arrived in 19.0. */
 const httpEntry = angularAtLeast('19.0');
-import {
-  pangularHttpInterceptor,
-  parseBody,
-  providePangularHttp,
-  resetTransferEntries,
-} from '../http.ts';
+import { pangularHttpInterceptor, providePangularHttp } from '../http.ts';
+import { parseBody, resetTransferEntries } from '../http-internals.ts';
 import { appIdOf, isHydrationMessage, scanHydration } from '../http-hydration.ts';
 import { attachHttp } from '../http-overlay.ts';
 import {
@@ -485,6 +481,33 @@ describe.runIf(angularAtLeast('16.0'))('interceptor', () => {
     expect(call.mocked).toBeUndefined();
   });
 
+  it('keeps the response body of a failing call as its preview, and none for a network error', async () => {
+    const failing =
+      (error: unknown, status: number): HttpHandlerFn =>
+      () =>
+        new Observable<HttpEvent<unknown>>((subscriber) => {
+          subscriber.error(new HttpErrorResponse({ status, error, url: '/api/products' }));
+        });
+    for (const [error, status] of [
+      [{ error: 'Simulated 503 from the demo API' }, 503],
+      ['Bad Request: name is required', 400],
+      [new ProgressEvent('error'), 0],
+    ] as const) {
+      await new Promise<void>((resolve) =>
+        run(new HttpRequest('GET', '/api/products'), failing(error, status)).subscribe({
+          error: () => resolve(),
+        }),
+      );
+    }
+    const [server, invalid, network] = httpRegistry().calls ?? [];
+    expect(server).toMatchObject({
+      status: 503,
+      preview: '{"error":"Simulated 503 from the demo API"}',
+    });
+    expect(invalid).toMatchObject({ status: 400, preview: 'Bad Request: name is required' });
+    expect(network?.preview).toBeUndefined();
+  });
+
   it('tags delayed, mocked and faulted calls apart', async () => {
     vi.useFakeTimers();
     storeRules([
@@ -562,6 +585,20 @@ describe.runIf(angularAtLeast('16.0'))('interceptor', () => {
     await get();
     await get();
     expect(httpRegistry().calls?.map((c) => c.cacheHit)).toEqual([true, false]);
+  });
+
+  it('counts no cache hit once the app was stable, when the transfer cache is off', async () => {
+    document.body.innerHTML = stateScript(new HttpRequest('GET', '/api/products'));
+    // `providePangularHttp()` notes when the app first became stable.
+    httpRegistry().stableMs = 400;
+    try {
+      await new Promise<void>((resolve) =>
+        run(new HttpRequest('GET', '/api/products'), later([])).subscribe({ complete: resolve }),
+      );
+      expect(httpRegistry().calls?.map((c) => c.cacheHit)).toEqual([false]);
+    } finally {
+      delete httpRegistry().stableMs;
+    }
   });
 
   it('counts an opted-in POST delivered later as a cache hit only for the same body', async () => {

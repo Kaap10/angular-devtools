@@ -9,7 +9,6 @@ import {
   staleReduxStoresPages,
   toReduxStoresReport,
 } from './redux-stores-tools.ts';
-import { MARKDOWN_OUTPUT_SCHEMA } from './agent-output.ts';
 
 type AnyRecord = Record<string, any>;
 
@@ -41,7 +40,7 @@ export interface ReduxStoresRegistration {
  * Stores that report through the Redux DevTools API (NGXS, Elf, MiniRx), part
  * of the store inspector: the `redux-stores` shared state, the
  * `push-redux-stores` and `forget-redux-stores-page` RPC functions and the
- * `inspect-redux-stores` agent tool.
+ * `redux-inspect-stores` agent tool.
  */
 export async function registerReduxStores(host: ReduxStoresHost): Promise<ReduxStoresRegistration> {
   const shared = await host.my.rpc.sharedState('redux-stores', {
@@ -88,11 +87,10 @@ export async function registerReduxStores(host: ReduxStoresHost): Promise<ReduxS
   });
 
   host.agent.registerTool({
-    id: 'pangular:inspect-redux-stores',
+    id: 'pangular:redux-inspect-stores',
     title: 'Inspect Redux DevTools stores',
-    outputSchema: MARKDOWN_OUTPUT_SCHEMA,
     description:
-      'Stores on the running page that report through the Redux DevTools extension API (`__REDUX_DEVTOOLS_EXTENSION__.connect()`), such as NGXS, Elf and MiniRx. Stores created at bootstrap need `@pangular-inspector/devtools/store-hook` loaded before the app starts. Without `store`: a table of stores with id, library and action count. With `store` (id or name), or when there is one store: its last state and latest actions, newest first, each with a state diff. For @ngrx/store use pangular:inspect-signal-store. Values are masked. Only reads. Uses `page` or the most recent page.',
+      'Stores that report through the Redux DevTools API (NGXS, Elf, MiniRx). Without `store`: a table of stores. With `store`: its state and latest actions with diffs. For @ngrx use ngrx-inspect-store. Masked; only reads.',
     inputSchema: {
       type: 'object',
       properties: {

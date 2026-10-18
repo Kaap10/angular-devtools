@@ -3,7 +3,9 @@ import { agentResourceOffered, type ResolvedPangularConfig } from './config.ts';
 import type { NgrxState } from './ngrx-shared.ts';
 import { code, formsResourceText, type FormsState } from './rpc/forms-tools.ts';
 import { LIVE_RESOURCE_NOTE, liveResourceText } from './rpc/resource-text.ts';
+import { injectorResourceText } from './rpc/injector-resource.ts';
 import { routerResourceText, type RouterState } from './rpc/router-tools.ts';
+import { withIdEdges } from './rpc/signal-tools.ts';
 import type { ComponentPage, InjectorPage } from './types.ts';
 
 /** One MCP resource template, as the patched `@devframes/agentic` server takes it. */
@@ -48,7 +50,8 @@ const INFO: Record<PageResourceName, PageResourceInfo> = {
   'injector-tree': {
     title: 'Angular Injector Tree of one page',
     what: 'an injector tree',
-    description: `The pangular:injector-tree resource for one page: element and environment injectors with their providers, and the zone mode, as JSON. ${LIVE_RESOURCE_NOTE}`,
+    description:
+      'The pangular:injector-tree resource for one page: element and environment injectors with their providers, and the zone mode, as JSON. Past 100,000 characters an outline with provider counts.',
   },
   'ngrx-store': {
     title: 'NgRx Store State of one page',
@@ -71,7 +74,7 @@ const INFO: Record<PageResourceName, PageResourceInfo> = {
 
 /** The URI of `name` for one page. */
 export function pageResourceUri(name: PageResourceName, pageId: string): string {
-  return `pangular://page/${encodeURIComponent(pageId)}/${name}`;
+  return `pangular://pages/${encodeURIComponent(pageId)}/${name}`;
 }
 
 /** A shared state the source reads and watches; `value()` is the live state. */
@@ -151,12 +154,12 @@ export function pageResourceText(name: PageResourceName, state: unknown, pageId:
       );
     }
     case 'signal-graph': {
-      const graph = (value['pages'] as Pages<unknown>)[pageId];
+      const graph = withIdEdges((value['pages'] as Pages<unknown>)[pageId]);
       return liveResourceText({ graph, pages: { [pageId]: graph } }, 'pangular:inspect-signals');
     }
     case 'injector-tree': {
       const page = (value['pages'] as Pages<InjectorPage>)[pageId]!;
-      return liveResourceText(
+      return injectorResourceText(
         {
           roots: page.roots,
           environment: page.environment,
@@ -164,13 +167,13 @@ export function pageResourceText(name: PageResourceName, state: unknown, pageId:
           truncated: page.truncated === true,
           zone: page.zone ?? null,
         },
-        'pangular:inspect-providers',
+        { [pageId]: page },
       );
     }
     case 'ngrx-store':
       return liveResourceText(
         { pages: (value as unknown as NgrxState).pages.filter((page) => page.pageId === pageId) },
-        'pangular:inspect-signal-store and pangular:signal-store-history',
+        'pangular:ngrx-inspect-store and pangular:ngrx-history',
       );
     case 'forms':
       return formsResourceText(formsOf(state as FormsState, pageId));
@@ -259,7 +262,7 @@ export function offeredPageResources(config: ResolvedPangularConfig): PageResour
 
 /**
  * The per-page resource templates the MCP server offers under `config`:
- * `pangular://page/{pageId}/<name>` for each page-scoped resource that is on
+ * `pangular://pages/{pageId}/<name>` for each page-scoped resource that is on
  * for agents (`inspectors`, `agent.tools`). `resources/list` also names one
  * concrete resource per reporting page, for clients without template support.
  */
@@ -267,15 +270,15 @@ export function pangularMcpResourceTemplates(
   config: ResolvedPangularConfig,
 ): PangularMcpResourceTemplate[] {
   return offeredPageResources(config).map((name) => ({
-    uriTemplate: `pangular://page/{pageId}/${name}`,
-    name: `pangular:page:${name}`,
+    uriTemplate: `pangular://pages/{pageId}/${name}`,
+    name: `pangular:${name}-of-page`,
     title: INFO[name].title,
     description: INFO[name].description,
     mimeType: 'application/json',
     list: (ctx) =>
       (sourceOf(ctx)?.pageIds(name) ?? []).map((pageId) => ({
         uri: pageResourceUri(name, pageId),
-        name: `pangular:page:${name}:${pageId}`,
+        name: `pangular:${name}-of-page:${pageId}`,
         title: `${INFO[name].title} (${pageId})`,
         description: `${INFO[name].title}, for page ${pageId}.`,
         mimeType: 'application/json',

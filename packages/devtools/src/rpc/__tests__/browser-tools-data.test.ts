@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createPangular } from '../../devframe.ts';
 import type { BrowserTool } from '../browser-tools.ts';
 import { PAGE_TOOL_SESSION_TEXT } from '../ngrx-session-tools.ts';
+import { toolAnswer } from '../../__tests__/tool-answer.ts';
 
 /** The data inspectors' tools (queries, Redux stores, NgRx history, waterfall, provider values) as page tools. */
 
@@ -13,7 +14,10 @@ async function boot() {
     getStorageDir: () => '',
   };
   const ctx = await createHostContext({ cwd: process.cwd(), mode: 'dev', host: host as never });
-  await createPangular({ agent: { browserTools: true } }).setup(ctx as never);
+  await createPangular({
+    agent: { browserTools: true },
+    inspectors: { tanstackQuery: true, capacitor: true },
+  }).setup(ctx as never);
   const invoke = ctx.rpc.invokeLocal.bind(ctx.rpc) as unknown as (
     name: string,
     ...args: unknown[]
@@ -59,32 +63,32 @@ describe('data inspector page tools', () => {
     const list = ((await rpc('list-browser-tools')) as BrowserTool[]).map((tool) => tool.name);
     expect(list).toEqual(
       expect.arrayContaining([
-        'pangular_list-queries',
-        'pangular_inspect-query',
-        'pangular_inspect-redux-stores',
-        'pangular_http-waterfall',
+        'pangular_tanstack-list-queries',
+        'pangular_tanstack-inspect-query',
+        'pangular_redux-inspect-stores',
+        'pangular_list-http-calls',
         'pangular_read-provider-value',
-        'pangular_inspect-ngrx-entry',
-        'pangular_generate-ngrx-test',
+        'pangular_ngrx-inspect-entry',
+        'pangular_ngrx-generate-test',
       ]),
     );
     for (const name of [
-      'pangular_export-ngrx-session',
-      'pangular_import-ngrx-session',
-      'pangular_restore-ngrx-state',
-      'pangular_query-action',
+      'pangular_ngrx-export-session',
+      'pangular_ngrx-import-session',
+      'pangular_ngrx-restore',
+      'pangular_tanstack-run-query',
     ]) {
       expect(list).not.toContain(name);
     }
   });
 
-  it('answers list-queries for the calling page only', async () => {
+  it('answers tanstack-list-queries for the calling page only', async () => {
     const { rpc } = await boot();
     await rpc('push-tanstack-query', queryReport('p1', '["mine"]'));
     await rpc('push-tanstack-query', queryReport('p2', '["theirs"]'));
     const mine = await rpc('call-browser-tool', {
       pageId: 'p1',
-      name: 'pangular_list-queries',
+      name: 'pangular_tanstack-list-queries',
       args: { page: 'p2' },
     });
     expect(mine.text).toContain('mine');
@@ -92,7 +96,7 @@ describe('data inspector page tools', () => {
     // A page that reports no queries is told so, without naming the pages that do.
     const none = await rpc('call-browser-tool', {
       pageId: 'p3',
-      name: 'pangular_list-queries',
+      name: 'pangular_tanstack-list-queries',
       args: {},
     });
     expect(none.text).toMatch(/This page is not reporting TanStack Query/);
@@ -101,7 +105,7 @@ describe('data inspector page tools', () => {
 
   it('refuses an imported NgRx session from a page tool, and reads it over MCP', async () => {
     const { ctx, rpc } = await boot();
-    for (const name of ['pangular_inspect-ngrx-entry', 'pangular_generate-ngrx-test']) {
+    for (const name of ['pangular_ngrx-inspect-entry', 'pangular_ngrx-generate-test']) {
       const answer = await rpc('call-browser-tool', {
         pageId: 'p1',
         name,
@@ -109,10 +113,11 @@ describe('data inspector page tools', () => {
       });
       expect(answer.text).toBe(PAGE_TOOL_SESSION_TEXT);
     }
-    const mcp = (await ctx.agent.invoke('pangular:inspect-ngrx-entry', {
-      seq: 1,
-      session: 'session-1',
-    })) as { markdown: string };
+    // Over MCP the session is looked up, and a session no longer kept is a refusal.
+    const mcp = await toolAnswer(
+      ctx.agent.invoke('pangular:ngrx-inspect-entry', { seq: 1, session: 'session-1' }),
+    );
+    expect(mcp.isError).toBe(true);
     expect(mcp.markdown).not.toBe(PAGE_TOOL_SESSION_TEXT);
     expect(mcp.markdown).toMatch(/no longer kept/);
   });

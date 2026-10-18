@@ -13,6 +13,7 @@
 // Express hub and CLI), action and readOnly gating, and a production build.
 //
 // Usage: pnpm e2e:security [--only leak|access|prod] [--keep] [--verbose]
+// E2E_SECURITY_PORT_BASE moves the 7 ports it listens on (default 5231-5237).
 // Needs a built package (pnpm devtools:build-pkg) and Playwright's Chromium.
 import { createRequire } from 'node:module';
 import {
@@ -28,7 +29,7 @@ import { join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { request as httpRequest } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -38,7 +39,16 @@ const OUT = join(ROOT, 'dist/e2e-security');
 const args = process.argv.slice(2);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : undefined;
 const verbose = args.includes('--verbose');
-const PORTS = { vite: 5231, viteAuth: 5232, hub: 5233, cli: 5234, prod: 5235, viteRo: 5236 };
+const PORT_BASE = Number(process.env.E2E_SECURITY_PORT_BASE) || 5231;
+const PORTS = {
+  vite: PORT_BASE,
+  viteAuth: PORT_BASE + 1,
+  hub: PORT_BASE + 2,
+  cli: PORT_BASE + 3,
+  prod: PORT_BASE + 4,
+  viteRo: PORT_BASE + 5,
+  viteHosts: PORT_BASE + 6,
+};
 
 if (!existsSync(join(DIST, 'vite.mjs'))) {
   console.error('Build the package first: pnpm devtools:build-pkg');
@@ -56,6 +66,16 @@ const cliRequire = createRequire(require.resolve('@angular/cli/package.json'));
 const { Client } = await import(cliRequire.resolve('@modelcontextprotocol/sdk/client/index.js'));
 const { StreamableHTTPClientTransport } = await import(
   cliRequire.resolve('@modelcontextprotocol/sdk/client/streamableHttp.js')
+);
+
+// devframe from the package's own dependencies: the same module instance the
+// built plugin loads, so `getTempAuthCode()` reads the fixture's code.
+const devframeRequire = createRequire(join(ROOT, 'packages/devtools/package.json'));
+const { connectDevframe } = await import(
+  pathToFileURL(devframeRequire.resolve('devframe/client')).href
+);
+const { getTempAuthCode } = await import(
+  pathToFileURL(devframeRequire.resolve('devframe/node/auth')).href
 );
 
 rmSync(OUT, { recursive: true, force: true });
@@ -161,6 +181,16 @@ function corpusPlugin() {
           return json(res, 401, { error: 'invalid', detail: `token ${C.http401Jwt.value}` });
         }
         if (url.pathname === '/svc/basic') return json(res, 200, { ok: true });
+        if (url.pathname === '/svc/form') return json(res, 200, { ok: true });
+        if (url.pathname === '/svc/xml') {
+          res.writeHead(200, { 'content-type': 'application/xml' });
+          return res.end(
+            `<login><user>ada</user><password>${C.httpXmlResp.value}</password></login>`,
+          );
+        }
+        if (url.pathname === '/svc/long') {
+          return json(res, 200, { pad: 'p'.repeat(1990), token: C.httpLongResp.value });
+        }
         if (url.pathname === '/svc/fail') return json(res, 500, { error: 'boom' });
         if (url.pathname === '/api/v1/secure') {
           return json(
@@ -177,20 +207,43 @@ function corpusPlugin() {
   };
 }
 
-async function startFixture(port, options, host = '127.0.0.1') {
+const QUERY_CORE = join(ROOT, 'packages/devtools/node_modules/@tanstack/query-core');
+
+/**
+ * `virtual:devtools-stop`: empty, or (`staticImport`) the static import of
+ * `disposeOverlay` from the `/overlay` entry that an earlier version of the
+ * docs showed, for the production run that checks it starts nothing.
+ */
+function stopImportPlugin(staticImport = false) {
+  const id = 'virtual:devtools-stop';
+  return {
+    name: 'e2e-devtools-stop',
+    resolveId: (source) => (source === id ? `\0${id}` : undefined),
+    load: (source) =>
+      source === `\0${id}`
+        ? staticImport
+          ? "import { disposeOverlay } from '@pangular-inspector/devtools/overlay';\nglobalThis.__stopDevtools = disposeOverlay;"
+          : 'export {};'
+        : undefined,
+  };
+}
+
+async function startFixture(port, options, host = '127.0.0.1', serverOptions = {}) {
   const server = await createServer({
     configFile: false,
     root: FIXTURE,
     logLevel: 'info',
-    server: { port, strictPort: true, host, forwardConsole: false },
+    server: { port, strictPort: true, host, forwardConsole: false, ...serverOptions },
     resolve: {
       alias: {
         '@pangular-inspector/devtools/overlay': join(DIST, 'overlay.mjs'),
         '@pangular-inspector/devtools/http': join(DIST, 'http.mjs'),
+        '@tanstack/query-core': QUERY_CORE,
       },
     },
     optimizeDeps: { noDiscovery: true, include: [] },
     plugins: [
+      stopImportPlugin(),
       angular({ tsconfig: join(FIXTURE, 'tsconfig.json') }),
       pangular({ redaction: { secretNames: ['zorblax'], unmask: ['legacyPin'] }, ...options }),
       corpusPlugin(),
@@ -425,10 +478,10 @@ async function leakRun() {
     'login',
     'route',
   ]) {
-    reads.push(['inspect-component', { selector: 'app-secret-card', path, depth: 6, page }]);
-    reads.push(['inspect-component', { selector: 'app-reactive-secrets', path, depth: 6, page }]);
-    reads.push(['inspect-component', { selector: 'app-template-secrets', path, depth: 6, page }]);
-    reads.push(['inspect-component', { selector: 'app-signal-secrets', path, depth: 6, page }]);
+    reads.push(['inspect-component', { component: 'app-secret-card', path, depth: 6, page }]);
+    reads.push(['inspect-component', { component: 'app-reactive-secrets', path, depth: 6, page }]);
+    reads.push(['inspect-component', { component: 'app-template-secrets', path, depth: 6, page }]);
+    reads.push(['inspect-component', { component: 'app-signal-secrets', path, depth: 6, page }]);
   }
   for (const token of [
     'API_CONFIG',
@@ -445,18 +498,18 @@ async function leakRun() {
     'ActionsSubject',
   ]) {
     reads.push(['read-provider-value', { token, depth: 6, limit: 500, page }]);
-    reads.push(['explain-injection', { selector: 'app-secret-card', token, page }]);
+    reads.push(['explain-injection', { injector: 'app-secret-card', token, page }]);
   }
   for (const path of ['endpoint', 'apiKey', 'clientSecret', 'note']) {
     reads.push(['read-provider-value', { token: 'API_CONFIG', path, page }]);
   }
   for (const form of forms) {
     reads.push(['inspect-forms', { form, includeValues: true, page }]);
-    reads.push(['explain-form-invalid', { form, page }]);
+    reads.push(['explain-invalid-forms', { form, page }]);
     reads.push(['explain-submit', { form, page }]);
-    reads.push(['form-payload', { form, page }]);
-    reads.push(['form-history', { form, limit: 200, page }]);
-    reads.push(['form-diff', { form, page }]);
+    reads.push(['inspect-form-payload', { form, page }]);
+    reads.push(['list-form-changes', { form, limit: 200, page }]);
+    reads.push(['explain-form-changes', { form, page }]);
     reads.push(['lint-forms', { form, page }]);
     reads.push(['explain-custom-control', { form, page }]);
     for (const format of ['json', 'markdown', 'typescript', 'test', 'har', 'csv']) {
@@ -486,8 +539,8 @@ async function leakRun() {
       'blob',
     ]) {
       reads.push(['explain-field', { form, path, page }]);
-      reads.push(['form-payload', { form, path, page }]);
-      reads.push(['form-history', { form, path, page }]);
+      reads.push(['inspect-form-payload', { form, path, page }]);
+      reads.push(['list-form-changes', { form, path, page }]);
     }
   }
   for (const name of ['authHeader', 'json', 'slice', 'async'])
@@ -497,32 +550,53 @@ async function leakRun() {
   reads.push(['inspect-transfer-state', { search: 'token', page }]);
   reads.push(['list-http-calls', { preview: true, headers: true, limit: 200, page }]);
   reads.push(['list-http-calls', { failed: true, preview: true, headers: true, page }]);
-  reads.push(['http-waterfall', { headers: true, limit: 200, page }]);
+  reads.push(['list-http-calls', { view: 'waterfall', headers: true, limit: 50, page }]);
   for (const id of [1, 2, 3, 4, 5, 6, 7, 8])
     reads.push(['explain-ssr-request', { id: String(id) }]);
   reads.push(['explain-navigation', { limit: 50, perf: true, page }]);
   for (const id of [1, 2, 3, 4]) {
     reads.push(['explain-navigation', { id, page }]);
-    reads.push(['export-navigation', { id, page }]);
+    reads.push(['explain-navigation', { format: 'repro', id, page }]);
   }
-  reads.push(['explain-render-mode', { url: '/acct/reset/x', page }]);
+  reads.push(['scan-render-mode', { url: '/acct/reset/x', page }]);
   reads.push(['list-routes', { page, audit: true }]);
   reads.push(['router-config', { page }]);
-  for (const seq of [0, 1, 2, 3, 4, 5]) reads.push(['inspect-ngrx-entry', { seq, page }]);
-  reads.push(['export-ngrx-session', { page }]);
-  reads.push(['generate-ngrx-test', { page }]);
-  reads.push(['inspect-signal-store', { page }]);
-  reads.push(['signal-store-history', { page }]);
+  for (const seq of [0, 1, 2, 3, 4, 5]) reads.push(['ngrx-inspect-entry', { seq, page }]);
+  reads.push(['ngrx-export-session', { page }]);
+  reads.push(['ngrx-generate-test', { page }]);
+  reads.push(['ngrx-inspect-store', { page }]);
+  reads.push(['ngrx-history', { page }]);
   reads.push(['list-console', { limit: 200, page }]);
   for (const level of ['log', 'info', 'warn', 'error', 'debug'])
     reads.push(['list-console', { level, page }]);
   reads.push(['list-errors', { limit: 200, page }]);
   for (const id of ['e1', 'e2', 'e3', 'e4']) reads.push(['explain-error', { id, page }]);
-  reads.push(['analog-server-calls', { limit: 200 }]);
-  reads.push(['analog-current-page', { page }]);
-  reads.push(['analog-explain-url', { url: '/acct/reset/abc?token=zzz' }]);
+  reads.push(['analog-list-server-calls', { limit: 200 }]);
+  reads.push(['analog-inspect-page', { page }]);
+  reads.push(['analog-scan-url', { url: '/acct/reset/abc?token=zzz' }]);
   reads.push(['snapshot', { page, maxChars: 200000, limit: 500 }]);
   reads.push(['startup-timing', { page, limit: 200 }]);
+  for (const path of [
+    'long250',
+    'long290',
+    'long480',
+    'long990',
+    'deep',
+    'keyed',
+    'byJwt',
+    'uniHolder',
+    'header2',
+    'openai',
+    'пароль',
+  ]) {
+    reads.push(['inspect-component', { component: 'app-secret-card', path, depth: 8, page }]);
+  }
+  reads.push(['tanstack-list-queries', { page }]);
+  reads.push(['tanstack-inspect-query', { page, id: 'q1' }]);
+  reads.push(['tanstack-inspect-query', { page, id: 'q2' }]);
+  reads.push(['tanstack-inspect-query', { page, id: 'q3' }]);
+  reads.push(['tanstack-inspect-query', { page, id: 'm1' }]);
+  reads.push(['tanstack-inspect-query', { page, id: 'm2' }]);
   reads.push(['find-leaks', { page, limit: 200 }]);
   for (const r of await client
     .listResources()
@@ -574,7 +648,7 @@ async function leakRun() {
   const actionReads = [
     ['record-pipes', { action: 'start', page }],
     ['track-subscriptions', { action: 'start', page }],
-    ['change-detection', { record: 'start', page }],
+    ['record-change-detection', { record: 'start', page }],
     ['watch-signal', { watch: true, page }],
   ];
   for (const [name, args] of actionReads) await callTool(client, tool(name), args);
@@ -586,21 +660,22 @@ async function leakRun() {
     ['explain-pipe', { name: 'json', page }],
     ['explain-pipe', { name: 'async', page }],
     ['track-subscriptions', { action: 'stop', page }],
-    ['change-detection', { record: 'stop', page, export: true }],
+    ['record-change-detection', { record: 'stop', page }],
+    ['change-detection', { page, export: 'json' }],
     ['diagnose-change-detection', { page }],
-    ['inspect-signals', { selector: 'app-secret-card', history: true, page }],
+    ['inspect-signals', { component: 'app-secret-card', history: true, page }],
     ['audit', { page, axe: true, limit: 500 }],
-    ['hydration', { page, overlay: false }],
+    ['hydration', { page }],
     [
-      'analog-call-api',
+      'analog-run-api',
       { path: `/api/v1/secure?token=${C.anUrlToken.value}`, method: 'GET', confirm: true },
     ],
-    ['analog-server-calls', { limit: 200 }],
+    ['analog-list-server-calls', { limit: 200 }],
   ];
   for (const [name, args] of afterReads) await callTool(client, tool(name), args);
   // The Analog playground puts the URL token in its own arguments; keep that out of the grep.
   for (const [channel, text] of channels) {
-    if (channel.includes('analog-call-api')) {
+    if (channel.includes('analog-run-api')) {
       channels.set(channel, text.split(C.anUrlToken.value).join('[arg]'));
     }
   }
@@ -611,15 +686,15 @@ async function leakRun() {
   const reactive = forms[0];
   const writes = [
     [
-      'form-action',
+      'run-form-action',
       { action: 'set-value', form: reactive, path: 'password', value: probe, confirm: true },
     ],
     [
-      'form-action',
+      'run-form-action',
       { action: 'set-value', form: reactive, path: 'apiKey', value: probe, confirm: true },
     ],
     [
-      'form-action',
+      'run-form-action',
       {
         action: 'set-value',
         form: reactive,
@@ -629,7 +704,7 @@ async function leakRun() {
       },
     ],
     [
-      'form-action',
+      'run-form-action',
       {
         action: 'set-value',
         form: reactive,
@@ -638,9 +713,9 @@ async function leakRun() {
         force: true,
       },
     ],
-    ['form-action', { action: 'reset', form: reactive, confirm: true }],
+    ['run-form-action', { action: 'reset', form: reactive, confirm: true }],
     [
-      'form-action',
+      'run-form-action',
       { action: 'restore', form: reactive, snapshot: { password: probe }, confirm: true },
     ],
     [
@@ -652,17 +727,17 @@ async function leakRun() {
       },
     ],
     [
-      'form-action',
+      'run-form-action',
       { action: 'set-value', form: reactive, path: 'apiSecret', value: probe, confirm: true },
     ],
     ['fill-form', { form: forms[2], values: { password: probe, token: probe }, confirm: true }],
     ['fill-form', { form: forms[1], values: { token: probe }, confirm: true }],
-    ['set-signal', { component: 'app-secret-card', signal: 'authToken', value: probe, page }],
+    ['set-signal', { component: 'app-secret-card', property: 'authToken', value: probe, page }],
     [
       'set-signal',
       {
         component: 'app-secret-card',
-        signal: 'profile',
+        property: 'profile',
         value: { name: 'x', secret: probe, mfaCode: probe },
         page,
       },
@@ -716,7 +791,7 @@ async function leakRun() {
   // The documented escape hatch: a key unmasked on window can be written.
   const unmasked = await callTool(
     client,
-    tool('form-action'),
+    tool('run-form-action'),
     {
       action: 'set-value',
       form: reactive,
@@ -724,12 +799,12 @@ async function leakRun() {
       value: 'unmask-write-ok',
       confirm: true,
     },
-    'mcp write form-action unmasked',
+    'mcp write run-form-action unmasked',
   );
   await delay(800);
   const recovery = (await appValues(app)).rfRecovery;
   check(
-    'window unmask lets form-action write recoveryKey',
+    'window unmask lets run-form-action write recoveryKey',
     recovery === 'unmask-write-ok',
     `${recovery}; ${unmasked.text.slice(0, 200)}`,
   );
@@ -743,12 +818,12 @@ async function leakRun() {
   const webmcp = await app.evaluate(async (page) => {
     const out = {};
     const extra = {
-      'pangular_inspect-component': { selector: 'app-secret-card', depth: 6 },
-      'pangular_inspect-signals': { selector: 'app-secret-card', history: true },
+      'pangular_inspect-component': { component: 'app-secret-card', depth: 6 },
+      'pangular_inspect-signals': { component: 'app-secret-card', history: true },
       'pangular_inspect-forms': { form: `ReactiveSecrets.group@${page}`, includeValues: true },
       'pangular_read-provider-value': { token: 'API_CONFIG', depth: 6 },
       'pangular_list-http-calls': { preview: true, headers: true },
-      'pangular_form-history': { form: `ReactiveSecrets.group@${page}`, limit: 200 },
+      'pangular_list-form-changes': { form: `ReactiveSecrets.group@${page}`, limit: 200 },
     };
     for (const [name, t] of window.__webmcpTools) {
       for (const args of [{}, extra[name]].filter(Boolean)) {
@@ -1107,6 +1182,7 @@ async function accessRun() {
   );
   await authed.close();
   await gateChecks('vite auth', fixture.origin, { mcpToken });
+  await codeGuardChecks('vite auth', `${fixture.origin}${HUB}pangular/`, before);
 
   // A browser on another origin, and the panel without the code: no page data.
   const attacker = await browser.newContext();
@@ -1200,6 +1276,43 @@ async function accessRun() {
   ]);
   await lanFixture.close();
 
+  // server.allowedHosts: true lets any Host through, but no other website (M2).
+  const hostsFrom = serverLog.length;
+  const hostsFixture = await startFixture(PORTS.viteHosts, {}, '127.0.0.1', {
+    allowedHosts: true,
+  });
+  const hostsOrigin = hostsFixture.origin;
+  const hostsConn = await raw(`${hostsOrigin}${HUB}pangular/__connection.json`, {
+    headers: { Origin: EVIL },
+  });
+  check(
+    'vite allowedHosts true: foreign Origin refused',
+    hostsConn.status === 403,
+    `status ${hostsConn.status}`,
+  );
+  const hostsWs = await raw(`${hostsOrigin}${HUB}__ws`, {
+    upgrade: true,
+    headers: { Origin: EVIL },
+  });
+  check(
+    'vite allowedHosts true: WebSocket from a foreign Origin refused',
+    hostsWs.status !== 101,
+    `status ${hostsWs.status}`,
+  );
+  const tunnel = await raw(`${hostsOrigin}${HUB}pangular/__connection.json`, {
+    headers: { Host: 'tunnel.example', Origin: 'https://tunnel.example' },
+  });
+  check(
+    'vite allowedHosts true: a same-origin tunnel page passes',
+    tunnel.status === 200,
+    `status ${tunnel.status}`,
+  );
+  check(
+    'vite allowedHosts true: prints a warning',
+    serverLog.slice(hostsFrom).join('').includes('server.allowedHosts is true'),
+  );
+  await hostsFixture.close();
+
   // Express hub: defaults, then production.
   await hubChecks(mcpToken);
   // Standalone CLI.
@@ -1207,6 +1320,60 @@ async function accessRun() {
   // Actions, readOnly, inspectors and agent.tools.
   await gatingChecks();
   delete process.env.PANGULAR_MCP_TOKEN;
+}
+
+/** A devframe client in Node, as a panel would connect. Close it when done. */
+async function devframeClient(baseURL, authToken) {
+  // The client reuses a connection it published on globalThis, which would be another server's.
+  for (const key of [
+    '__DEVFRAME_CONNECTION__',
+    '__DEVFRAME_CONNECTION_META__',
+    '__DEVFRAME_CONNECTION_AUTH_TOKEN__',
+  ]) {
+    delete globalThis[key];
+  }
+  Object.defineProperty(globalThis, 'location', {
+    value: new URL(baseURL),
+    configurable: true,
+    writable: true,
+  });
+  return connectDevframe({
+    baseURL,
+    ...(authToken ? { authToken } : {}),
+    simpleAuth: false,
+    otpParam: false,
+    webmcp: false,
+  });
+}
+
+async function trustedWith(baseURL, authToken) {
+  const rpc = await devframeClient(baseURL, authToken);
+  const trusted = await rpc.ensureTrusted(2000).catch(() => false);
+  rpc.close?.();
+  return trusted === true;
+}
+
+/** A burst of wrong one-time codes from several connections is throttled (B1). */
+async function codeGuardChecks(label, baseURL, logFrom) {
+  const clients = [];
+  for (let i = 0; i < 4; i++) clients.push(await devframeClient(baseURL));
+  const started = Date.now();
+  // 12 wrong codes in total: over the 10-a-minute cap for all clients.
+  for (const rpc of clients) {
+    for (let i = 0; i < 3; i++) await rpc.requestTrustWithCode('xxxxxx').catch(() => false);
+  }
+  const fresh = await devframeClient(baseURL);
+  const right = await fresh.requestTrustWithCode(getTempAuthCode()).catch(() => false);
+  check(
+    `${label}: the right code is refused during a burst of wrong ones`,
+    !right,
+    `trusted after ${Date.now() - started} ms`,
+  );
+  check(
+    `${label}: the burst prints a warning`,
+    serverLog.slice(logFrom).join('').includes('wrong one-time codes'),
+  );
+  for (const rpc of [...clients, fresh]) rpc.close?.();
 }
 
 async function hubChecks(mcpToken) {
@@ -1267,29 +1434,116 @@ async function hubChecks(mcpToken) {
   }
 }
 
+/** The token store folder for a project, as `auth-store.ts` names it. */
+function authStoreDir(home, projectRoot) {
+  const key = createHash('sha256').update(resolve(projectRoot)).digest('hex').slice(0, 16);
+  return join(home, '.pangular-inspector', 'auth', key);
+}
+
+function seedTokens(dir, tokens) {
+  mkdirSync(dir, { recursive: true });
+  const trusted = Object.fromEntries(
+    Object.entries(tokens).map(([token, timestamp]) => [
+      token,
+      { authToken: token, ua: 'seed', origin: 'http://localhost', timestamp },
+    ]),
+  );
+  writeFileSync(join(dir, 'auth.json'), JSON.stringify({ trusted }));
+}
+
 async function cliChecks() {
+  // A private home, with trusted tokens seeded: one expired, one fresh, and
+  // one from another project's store (M1).
+  const home = join(OUT, 'cli-home');
+  const store = authStoreDir(home, FIXTURE);
+  const expired = randomBytes(24).toString('hex');
+  const fresh = randomBytes(24).toString('hex');
+  const foreign = randomBytes(24).toString('hex');
+  seedTokens(store, { [expired]: Date.now() - 8 * 24 * 3600 * 1000, [fresh]: Date.now() });
+  seedTokens(authStoreDir(home, ROOT), { [foreign]: Date.now() });
+  const mcpToken = process.env.PANGULAR_MCP_TOKEN;
   const child = spawn(
     process.execPath,
-    [join(ROOT, 'bin.mjs'), 'dev', '--root', FIXTURE, '--port', String(PORTS.cli)],
+    // `--host 127.0.0.1`: the default `localhost` resolves to ::1 first on some
+    // runners, and the checks below address the server as 127.0.0.1.
+    [
+      join(ROOT, 'bin.mjs'),
+      'dev',
+      '--root',
+      FIXTURE,
+      '--port',
+      String(PORTS.cli),
+      '--host',
+      '127.0.0.1',
+    ],
     {
       cwd: ROOT,
-      env: { ...process.env },
+      env: { ...process.env, HOME: home },
     },
   );
   let out = '';
   child.stdout.on('data', (d) => (out += d));
   child.stderr.on('data', (d) => (out += d));
-  for (let i = 0; i < 150 && !/localhost|127\.0\.0\.1/.test(out); i++) await delay(100);
-  await delay(1000);
   const origin = `http://127.0.0.1:${PORTS.cli}`;
-  capture('cli dev log', out);
+  // Wait until the server answers, not until it prints: on a slow runner the
+  // banner can come before the socket listens.
+  let exited = false;
+  child.once('exit', () => (exited = true));
+  for (let i = 0; i < 300 && !exited; i++) {
+    if ((await raw(`${origin}/`)).status) break;
+    await delay(100);
+  }
+  if (exited || !(await raw(`${origin}/`)).status) {
+    throw new Error(`pangular dev did not answer on ${origin}:\n${out}`);
+  }
   const base = out.match(/https?:\/\/[^\s]+?(\/[^\s]*)/)?.[1] ?? '/';
   notes.push(`CLI dev printed: ${out.trim().split('\n').slice(0, 4).join(' / ')}`);
   const panelPath = base.endsWith('/') ? base : `${base}/`;
   const mcpPath = `${panelPath}__mcp`;
-  await gateChecks('cli dev', origin, { mcpPath, panelPath, wsPath: `${panelPath}__ws` });
+  // The MCP token, as on the hub and the Vite plugin (M3).
+  await gateChecks('cli dev', origin, {
+    mcpToken,
+    mcpPath,
+    panelPath,
+    wsPath: `${panelPath}__ws`,
+  });
+  const tunnelMcp = await mcpPost(origin, {
+    path: mcpPath,
+    host: 'localhost',
+    originHeader: 'http://localhost',
+  });
+  check(
+    'cli dev: MCP without the token refused for a loopback Origin',
+    tunnelMcp.status === 401,
+    `status ${tunnelMcp.status}`,
+  );
   // Docs: the CLI binds to localhost, so another interface does not answer.
   await remoteChecks('cli dev', PORTS.cli, [panelPath]);
+
+  // Trusted tokens: expired and foreign ones refused, fresh ones kept (M1).
+  const baseURL = `${origin}${panelPath}`;
+  check('cli dev: a fresh stored token is trusted', await trustedWith(baseURL, fresh));
+  check('cli dev: an expired stored token is refused', !(await trustedWith(baseURL, expired)));
+  check("cli dev: another project's token is refused", !(await trustedWith(baseURL, foreign)));
+  const rpc = await devframeClient(baseURL);
+  const from = out.length;
+  await rpc.requestAuthCode().catch(() => undefined);
+  for (let i = 0; i < 50 && !/\b\d{6}\b/.test(out.slice(from)); i++) await delay(100);
+  const code = out.slice(from).match(/\b(\d{6})\b/)?.[1] ?? '';
+  check('cli dev: the code trusts a browser', !!(await rpc.requestTrustWithCode(code)));
+  rpc.close?.();
+  await delay(1000);
+  const file = join(store, 'auth.json');
+  const mode = (path) => (existsSync(path) ? (statSync(path).mode & 0o777).toString(8) : 'none');
+  check('cli dev: the token file is 0600', mode(file) === '600', mode(file));
+  check('cli dev: the token folder is 0700', mode(store) === '700', mode(store));
+  const stored = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  check('cli dev: the expired token was dropped', !stored.includes(expired));
+  check(
+    'cli dev: nothing written to the shared devframe store',
+    !existsSync(join(home, '.pangular', 'devframe', 'auth.json')),
+  );
+  capture('cli dev log', out);
   child.kill();
   await new Promise((d) => child.on('close', d));
 }
@@ -1304,12 +1558,15 @@ async function gatingChecks() {
     ['agent.tools.forms false', { auth: false, agent: { tools: { forms: false } } }],
   ];
   const ACTION = [
-    'form-action',
+    'run-form-action',
     'fill-form',
     'navigate',
-    'dispatch-ngrx-action',
-    'restore-ngrx-state',
-    'query-action',
+    'probe-route',
+    'record-guards',
+    'record-change-detection',
+    'ngrx-dispatch',
+    'ngrx-restore',
+    'tanstack-run-query',
     'set-http-rule',
     'remove-http-rule',
     'set-ssr-override',
@@ -1319,7 +1576,7 @@ async function gatingChecks() {
     'watch-signal',
     'record-pipes',
     'track-subscriptions',
-    'analog-call-api',
+    'analog-run-api',
     'clear-recordings',
   ];
   for (const [label, options] of cases) {
@@ -1342,31 +1599,35 @@ async function gatingChecks() {
       g('no action tool is listed', left.length === 0, left.join(', '));
       const call = await callTool(
         client,
-        'pangular_form-action',
+        'pangular_run-form-action',
         { action: 'set-value', form, path: 'username', value: 'ro', confirm: true },
         `gating ${label}`,
       );
-      g('form-action call refused', !call.ok, call.text.slice(0, 120));
+      g('run-form-action call refused', !call.ok, call.text.slice(0, 120));
     }
     if (label === 'actions false') {
       const left = ACTION.filter(
         (n) =>
           names.has(n) &&
           ![
-            'navigate',
             'clear-recordings',
             'watch-signal',
             'record-pipes',
             'track-subscriptions',
+            'record-guards',
+            'record-change-detection',
           ].includes(n),
       );
       g('write tools are dropped', left.length === 0, left.join(', '));
     }
     if (label === 'actions.forms false') {
-      g('form-action and fill-form dropped', !names.has('form-action') && !names.has('fill-form'));
+      g(
+        'run-form-action and fill-form dropped',
+        !names.has('run-form-action') && !names.has('fill-form'),
+      );
       const call = await callTool(
         client,
-        'pangular_form-action',
+        'pangular_run-form-action',
         { action: 'set-value', form, path: 'username', value: 'blocked', confirm: true },
         `gating ${label}`,
       );
@@ -1400,11 +1661,22 @@ async function gatingChecks() {
         !read.text.includes('ReactiveSecrets'),
         read.text.slice(0, 100),
       );
+      // devframe_state_read hides pangular:forms in every config (RESOURCE_STATE_KEYS), so the
+      // resource that serves it is the read that can leak.
+      const resource = await client
+        .readResource({ uri: `devframe://resource/${encodeURIComponent('pangular:forms')}` })
+        .then((r) => r.contents?.map((c) => c.text ?? '').join('\n') ?? '')
+        .catch((error) => String(error?.message ?? error));
+      g(
+        'pangular:forms resource not readable',
+        !resource.includes('ReactiveSecrets'),
+        resource.slice(0, 100),
+      );
     }
     if (label === 'agent.tools.forms false') {
       g(
         'forms tools hidden from agents',
-        !names.has('inspect-forms') && !names.has('form-action'),
+        !names.has('inspect-forms') && !names.has('run-form-action'),
         '',
       );
       const read = await callTool(
@@ -1437,7 +1709,14 @@ async function gatingChecks() {
 // Production build: no overlay, no debug API, no live data
 
 async function prodRun() {
-  const outDir = join(OUT, 'prod');
+  // The documented setup (dynamic import in a dev check), then a static import
+  // of the `/overlay` entry, which must start nothing in production either.
+  await prodCase('production', false);
+  await prodCase('production, static /overlay import', true);
+}
+
+async function prodCase(label, staticImport) {
+  const outDir = join(OUT, staticImport ? 'prod-static' : 'prod');
   const { build, preview } = await import('vite');
   await build({
     configFile: false,
@@ -1449,15 +1728,27 @@ async function prodRun() {
       alias: {
         '@pangular-inspector/devtools/overlay': join(DIST, 'overlay.mjs'),
         '@pangular-inspector/devtools/http': join(DIST, 'http.mjs'),
+        '@tanstack/query-core': QUERY_CORE,
       },
     },
-    plugins: [angular({ tsconfig: join(FIXTURE, 'tsconfig.json') }), pangular({}), corpusPlugin()],
+    plugins: [
+      stopImportPlugin(staticImport),
+      angular({ tsconfig: join(FIXTURE, 'tsconfig.json') }),
+      pangular({}),
+      corpusPlugin(),
+    ],
   });
   const bundle = filesUnder(outDir)
     .filter((f) => f.endsWith('.js'))
     .map((f) => readFileSync(f, 'utf8'))
     .join('\n');
-  check('production bundle has no overlay', !/initOverlay|__devframes|pangular-popup/.test(bundle));
+  // A static import keeps the overlay's code in the bundle; only its start must be gone.
+  if (!staticImport) {
+    check(
+      'production bundle has no overlay',
+      !/initOverlay|__devframes|pangular-popup/.test(bundle),
+    );
+  }
   const server = await preview({
     configFile: false,
     root: FIXTURE,
@@ -1481,7 +1772,8 @@ async function prodRun() {
     getComponent: typeof window.ng?.getComponent,
     ngDevMode: typeof window.ngDevMode === 'undefined' ? 'undefined' : String(window.ngDevMode),
     popup: !!document.querySelector('#pangular-popup-root'),
-    // __PANGULAR_FORMS__ is the app's own setting, written by the fixture.
+    // __PANGULAR_FORMS__ is the app's own setting, written by the fixture;
+    // __stopDevtools is the static import's own export.
     globals: [
       ...Object.keys(window).filter(
         (k) => /pangular|devframe/i.test(k) && k !== '__PANGULAR_FORMS__',
@@ -1492,18 +1784,18 @@ async function prodRun() {
     ],
   }));
   check(
-    'production: window.ng absent',
+    `${label}: window.ng absent`,
     probe.ng === 'undefined' || probe.getComponent === 'undefined',
     JSON.stringify(probe),
   );
-  check('production: no overlay button', !probe.popup);
+  check(`${label}: no overlay button`, !probe.popup);
   check(
-    'production: no request to the devtools server',
+    `${label}: no request to the devtools server`,
     hubRequests.length === 0,
     hubRequests.join(' '),
   );
   check(
-    'production: no devtools globals on window',
+    `${label}: no devtools globals on window`,
     probe.globals.length === 0,
     probe.globals.join(', '),
   );

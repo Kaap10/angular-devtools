@@ -252,7 +252,11 @@ export const PLUGIN_ID = /^[a-z][a-z0-9-]{0,39}$/;
 
 export interface ResolvedPangularConfig {
   inspectors: Record<PangularInspector, boolean>;
-  agent: { readOnly: boolean; tools: Record<PangularInspector, boolean>; browserTools: boolean };
+  agent: {
+    readOnly: boolean;
+    tools: Record<PangularInspector, boolean>;
+    browserTools: boolean;
+  };
   actions: Record<PangularAction, boolean>;
   redaction: { secretNames: string[]; unmask: string[] };
   limits: Record<PangularLimit, number>;
@@ -588,6 +592,29 @@ function flags<K extends string>(
 }
 
 /** Fills in the defaults. Accepts untrusted input, and its own output unchanged. */
+/** Inspectors for a library an app may not use; see `agent.autoLibraries`. */
+export const LIBRARY_INSPECTORS: readonly PangularInspector[] = [
+  'analog',
+  'capacitor',
+  'tanstackQuery',
+];
+
+/**
+ * The library inspectors (`analog`, `capacitor`, `tanstackQuery`) a config
+ * leaves to the project: neither `inspectors.<name>` nor `agent.tools.<name>`
+ * is set. Their agent tools are offered only once the project or a page uses
+ * the library (`rpc/library-tools.ts`). Read from the config as given, since
+ * the resolved config sets every switch.
+ */
+export function autoLibraries(config?: unknown): PangularInspector[] {
+  const input = record(config);
+  const inspectorInput = record(input['inspectors']);
+  const toolInput = record(record(input['agent'])['tools']);
+  return LIBRARY_INSPECTORS.filter(
+    (key) => inspectorInput[key] === undefined && toolInput[key] === undefined,
+  );
+}
+
 export function resolvePangularConfig(config?: unknown): ResolvedPangularConfig {
   const input = record(config);
   const agent = record(input['agent']);
@@ -907,7 +934,7 @@ export interface AgentEntry {
  */
 export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   // Shared: no inspector turns these off.
-  'build-meta': { kind: 'rpc' },
+  'scan-build': { kind: 'tool' },
   'list-pages': { kind: 'tool', page: true },
   'open-in-panel': { kind: 'tool', page: true },
   // Reads every inspector's data and leaves out the sections that are off.
@@ -918,32 +945,27 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   // condition needs its own inspector.
   'wait-for': {
     kind: 'tool',
-    inspectors: ['components', 'router', 'http', 'errors'],
+    inspectors: ['components', 'router', 'http', 'errors', 'forms'],
     anyInspector: true,
     page: true,
   },
 
   // components
-  'get-components': { kind: 'rpc', inspectors: ['components'] },
-  'lint-templates': { kind: 'tool', inspectors: ['components'] },
+  'scan-components': { kind: 'tool', inspectors: ['components'] },
+  'scan-templates': { kind: 'tool', inspectors: ['components'] },
   'component-tree': { kind: 'resource', inspectors: ['components'], page: true },
   highlight: { kind: 'tool', inspectors: ['components'], page: true },
   'inspect-component': { kind: 'tool', inspectors: ['components'], page: true },
   'list-components': { kind: 'tool', inspectors: ['components'], page: true },
   'defer-blocks': { kind: 'tool', inspectors: ['components'], page: true },
   'for-blocks': { kind: 'tool', inspectors: ['components'], page: true },
-  hydration: {
+  hydration: { kind: 'tool', inspectors: ['components'], page: true },
+  'change-detection': { kind: 'tool', inspectors: ['components'], page: true },
+  // Starts, stops or clears a recording and turns the live views on.
+  'record-change-detection': {
     kind: 'tool',
     inspectors: ['components'],
     safety: 'action',
-    readOnlyVariant: true,
-    page: true,
-  },
-  'change-detection': {
-    kind: 'tool',
-    inspectors: ['components'],
-    safety: 'action',
-    readOnlyVariant: true,
     page: true,
   },
   'diagnose-change-detection': { kind: 'tool', inspectors: ['components'], page: true },
@@ -971,13 +993,13 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   'screenshot-component': { kind: 'tool', inspectors: ['components'], page: true },
 
   // signals
-  'get-signals': { kind: 'rpc', inspectors: ['signals'] },
+  'scan-signals': { kind: 'tool', inspectors: ['signals'] },
   'signal-graph': { kind: 'resource', inspectors: ['signals'], page: true },
   'inspect-signals': { kind: 'tool', inspectors: ['signals'], page: true },
   'watch-signal': { kind: 'tool', inspectors: ['signals'], safety: 'action', page: true },
 
   // injectors
-  'get-providers': { kind: 'rpc', inspectors: ['injectors'] },
+  'scan-providers': { kind: 'tool', inspectors: ['injectors'] },
   'injector-tree': { kind: 'resource', inspectors: ['injectors'], page: true },
   'inspect-providers': { kind: 'tool', inspectors: ['injectors'], page: true },
   'explain-injection': { kind: 'tool', inspectors: ['injectors'], page: true },
@@ -985,34 +1007,34 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   'startup-timing': { kind: 'tool', inspectors: ['injectors'], page: true },
 
   // ngrx
-  'get-ngrx-store': { kind: 'rpc', inspectors: ['ngrx'] },
+  'ngrx-scan': { kind: 'tool', inspectors: ['ngrx'] },
   'ngrx-store': { kind: 'resource', inspectors: ['ngrx'], page: true },
-  'dispatch-ngrx-action': {
+  'ngrx-dispatch': {
     kind: 'tool',
     inspectors: ['ngrx'],
     safety: 'action',
     actions: ['ngrx'],
     page: true,
   },
-  'inspect-signal-store': { kind: 'tool', inspectors: ['ngrx'], page: true },
-  'signal-store-history': { kind: 'tool', inspectors: ['ngrx'], page: true },
-  'inspect-ngrx-entry': { kind: 'tool', inspectors: ['ngrx'] },
-  'export-ngrx-session': { kind: 'tool', inspectors: ['ngrx'], page: true },
-  'import-ngrx-session': { kind: 'tool', inspectors: ['ngrx'] },
-  'generate-ngrx-test': { kind: 'tool', inspectors: ['ngrx'] },
-  'restore-ngrx-state': {
+  'ngrx-inspect-store': { kind: 'tool', inspectors: ['ngrx'], page: true },
+  'ngrx-history': { kind: 'tool', inspectors: ['ngrx'], page: true },
+  'ngrx-inspect-entry': { kind: 'tool', inspectors: ['ngrx'] },
+  'ngrx-export-session': { kind: 'tool', inspectors: ['ngrx'], page: true },
+  'ngrx-import-session': { kind: 'tool', inspectors: ['ngrx'] },
+  'ngrx-generate-test': { kind: 'tool', inspectors: ['ngrx'] },
+  'ngrx-restore': {
     kind: 'tool',
     inspectors: ['ngrx'],
     safety: 'action',
     actions: ['ngrx'],
     page: true,
   },
-  'inspect-redux-stores': { kind: 'tool', inspectors: ['ngrx'], page: true },
+  'redux-inspect-stores': { kind: 'tool', inspectors: ['ngrx'], page: true },
 
   // tanstackQuery
-  'list-queries': { kind: 'tool', inspectors: ['tanstackQuery'], page: true },
-  'inspect-query': { kind: 'tool', inspectors: ['tanstackQuery'], page: true },
-  'query-action': {
+  'tanstack-list-queries': { kind: 'tool', inspectors: ['tanstackQuery'], page: true },
+  'tanstack-inspect-query': { kind: 'tool', inspectors: ['tanstackQuery'], page: true },
+  'tanstack-run-query': {
     kind: 'tool',
     inspectors: ['tanstackQuery'],
     safety: 'action',
@@ -1023,17 +1045,16 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   // forms
   forms: { kind: 'resource', inspectors: ['forms'], page: true },
   'inspect-forms': { kind: 'tool', inspectors: ['forms'], page: true },
-  'explain-form-invalid': { kind: 'tool', inspectors: ['forms'], page: true },
+  'explain-invalid-forms': { kind: 'tool', inspectors: ['forms'], page: true },
   'explain-field': { kind: 'tool', inspectors: ['forms'], page: true },
   'explain-submit': { kind: 'tool', inspectors: ['forms'], page: true },
-  'form-payload': { kind: 'tool', inspectors: ['forms'], page: true },
-  'form-history': { kind: 'tool', inspectors: ['forms'], page: true },
-  'form-diff': { kind: 'tool', inspectors: ['forms'], page: true },
+  'inspect-form-payload': { kind: 'tool', inspectors: ['forms'], page: true },
+  'list-form-changes': { kind: 'tool', inspectors: ['forms'], page: true },
+  'explain-form-changes': { kind: 'tool', inspectors: ['forms'], page: true },
   'lint-forms': { kind: 'tool', inspectors: ['forms'], page: true },
   'explain-custom-control': { kind: 'tool', inspectors: ['forms'], page: true },
   'export-form': { kind: 'tool', inspectors: ['forms'], page: true },
-  'wait-for-form': { kind: 'tool', inspectors: ['forms'], page: true },
-  'form-action': {
+  'run-form-action': {
     kind: 'tool',
     inspectors: ['forms'],
     safety: 'action',
@@ -1049,27 +1070,35 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   },
 
   // router
-  'get-routes': { kind: 'rpc', inspectors: ['router'] },
+  'scan-routes': { kind: 'tool', inspectors: ['router'] },
   router: { kind: 'resource', inspectors: ['router'], page: true },
   'inspect-route': { kind: 'tool', inspectors: ['router'], page: true },
   'explain-navigation': { kind: 'tool', inspectors: ['router'], page: true },
   'list-routes': { kind: 'tool', inspectors: ['router'], page: true },
   'lint-routes': { kind: 'tool', inspectors: ['router'], page: true },
   'router-config': { kind: 'tool', inspectors: ['router'], page: true },
-  'export-navigation': { kind: 'tool', inspectors: ['router'], page: true },
-  'explain-render-mode': { kind: 'tool', inspectors: ['router'] },
+  'scan-render-mode': { kind: 'tool', inspectors: ['router'] },
   navigate: {
     kind: 'tool',
     inspectors: ['router'],
     safety: 'action',
     actions: ['router'],
-    freeModes: ['instrument', 'resolve-lazy'],
     page: true,
   },
+  // Runs the canMatch guards of the routes a URL would match.
+  'probe-route': {
+    kind: 'tool',
+    inspectors: ['router'],
+    safety: 'action',
+    actions: ['router'],
+    page: true,
+  },
+  // Turns guard and resolver timing on or off in the page.
+  'record-guards': { kind: 'tool', inspectors: ['router'], safety: 'action', page: true },
 
   // pipes
-  'get-pipes': { kind: 'rpc', inspectors: ['pipes'] },
-  'lint-pipes': { kind: 'tool', inspectors: ['pipes'] },
+  'scan-pipes': { kind: 'tool', inspectors: ['pipes'] },
+  'scan-pipe-usage': { kind: 'tool', inspectors: ['pipes'] },
   'explain-pipe': { kind: 'tool', inspectors: ['pipes'] },
   'record-pipes': { kind: 'tool', inspectors: ['pipes'], safety: 'action', page: true },
 
@@ -1077,7 +1106,6 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   'list-ssr-requests': { kind: 'tool', inspectors: ['http'], page: true },
   'explain-ssr-request': { kind: 'tool', inspectors: ['http'], page: true },
   'list-http-calls': { kind: 'tool', inspectors: ['http'], page: true },
-  'http-waterfall': { kind: 'tool', inspectors: ['http'], page: true },
   'list-http-rules': { kind: 'tool', inspectors: ['http'], page: true },
   'set-http-rule': {
     kind: 'tool',
@@ -1111,23 +1139,23 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   },
 
   // analog
-  'analog-routes': { kind: 'tool', inspectors: ['analog'] },
-  'analog-explain-url': { kind: 'tool', inspectors: ['analog'] },
-  'analog-current-page': { kind: 'tool', inspectors: ['analog'], page: true },
-  'analog-server-calls': { kind: 'tool', inspectors: ['analog'], page: true },
-  'analog-server-functions': { kind: 'tool', inspectors: ['analog'] },
-  'analog-api-routes': { kind: 'tool', inspectors: ['analog'] },
+  'analog-scan-routes': { kind: 'tool', inspectors: ['analog'] },
+  'analog-scan-url': { kind: 'tool', inspectors: ['analog'] },
+  'analog-inspect-page': { kind: 'tool', inspectors: ['analog'], page: true },
+  'analog-list-server-calls': { kind: 'tool', inspectors: ['analog'], page: true },
+  'analog-scan-server-functions': { kind: 'tool', inspectors: ['analog'] },
+  'analog-scan-api-routes': { kind: 'tool', inspectors: ['analog'] },
   // Sends writes to the app's own API routes.
-  'analog-call-api': {
+  'analog-run-api': {
     kind: 'tool',
     inspectors: ['analog'],
     safety: 'destructive',
     actions: ['analog'],
     page: true,
   },
-  'analog-render-modes': { kind: 'tool', inspectors: ['analog'] },
-  'analog-prerender-plan': { kind: 'tool', inspectors: ['analog'] },
-  'analog-content': { kind: 'tool', inspectors: ['analog'] },
+  'analog-explain-render-modes': { kind: 'tool', inspectors: ['analog'] },
+  'analog-scan-prerender': { kind: 'tool', inspectors: ['analog'] },
+  'analog-scan-content': { kind: 'tool', inspectors: ['analog'] },
   'analog-lint': { kind: 'tool', inspectors: ['analog'] },
 
   // http, router and analog: erases what the three inspectors record.
@@ -1140,8 +1168,8 @@ export const AGENT_ENTRIES: Readonly<Record<string, AgentEntry>> = {
   },
 
   // capacitor
-  'list-capacitor-calls': { kind: 'tool', inspectors: ['capacitor'], page: true },
-  'list-capacitor-plugins': { kind: 'tool', inspectors: ['capacitor'], page: true },
+  'capacitor-list-calls': { kind: 'tool', inspectors: ['capacitor'], page: true },
+  'capacitor-list-plugins': { kind: 'tool', inspectors: ['capacitor'], page: true },
 
   // errors
   'list-errors': { kind: 'tool', inspectors: ['errors'], page: true },
@@ -1199,8 +1227,7 @@ export const AGENT_SAFETY: Record<
 
 /**
  * Tools that `agent.readOnly` keeps as `read` tools, with the arguments that
- * act refused: `change-detection` still answers, but without `record`,
- * `hydration` without `overlay`, and `audit` without `axe`. From
+ * act refused: `audit` still answers, but without `axe`. From
  * `readOnlyVariant` in `AGENT_ENTRIES`.
  */
 export const READ_ONLY_VARIANTS: readonly string[] = /* @__PURE__ */ agentEntryNames(
@@ -1428,6 +1455,21 @@ export const SHARED_STATE_INSPECTOR: Record<string, PangularInspector> = {
   plugins: 'plugins',
 };
 
+/**
+ * Shared-state keys an agent resource serves (`pangular:component-tree` and
+ * so on), and `routes`, which no collector fills. MCP clients don't get them
+ * as shared state, so the same data is not listed three times.
+ */
+export const RESOURCE_STATE_KEYS: readonly string[] = [
+  'component-tree',
+  'signal-graph',
+  'injector-tree',
+  'ngrx-store',
+  'forms',
+  'router',
+  'routes',
+];
+
 /** Shared-state keys that belong to no inspector, without the `pangular:` prefix. */
 export const SHARED_STATE_KEYS: readonly string[] = [
   'page-visibility',
@@ -1443,8 +1485,12 @@ export const SHARED_STATE_KEYS: readonly string[] = [
  * Keys of the hub and of other devframes are left to them.
  */
 export function sharedStateExposed(key: string, config: ResolvedPangularConfig): boolean {
+  // Devframe's own settings, docks and commands are the panel's, not the app's.
+  if (key.startsWith('devframe:')) return false;
   if (!key.startsWith('pangular:')) return true;
   const name = agentName(key);
+  // A resource serves the same data, so agents read it once, from there.
+  if (RESOURCE_STATE_KEYS.includes(name)) return false;
   if (SHARED_STATE_KEYS.includes(name)) return true;
   // Every page plugin's view, in one key: shown only while no plugin has its
   // tools turned off, since a key can't be filtered per plugin.

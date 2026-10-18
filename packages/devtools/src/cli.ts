@@ -1,3 +1,4 @@
+import { cliErrorText } from './cli-error.ts';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -23,6 +24,7 @@ import {
   type ResolvedPangularConfig,
 } from './config.ts';
 import { pangularMcp } from './agent-mcp.ts';
+import { PANGULAR_MCP_TOKEN_ENV, loadMcpToken } from './mcp-token.ts';
 import { registerSkillsCommand } from './skills-install.ts';
 import { registerLintCommand } from './lint-export.ts';
 import pkg from '../package.json' with { type: 'json' };
@@ -178,10 +180,11 @@ function copyCommand(cli: CAC, from: Command, name: string, description: string)
 }
 
 /** What `createPangular()` gets for a command: pairing tokens only for the dev server. */
-export function cliHostOptions(command: string, access: CliAccess) {
+export function cliHostOptions(command: string, access: CliAccess, notAProject?: string) {
   return {
     pageTools: command !== 'mcp',
     authTokens: command === 'dev' ? access.authTokens : [],
+    ...(notAProject ? { notAProject } : {}),
   };
 }
 
@@ -212,6 +215,21 @@ export function proxyAuth(panelUrl: string) {
     ctx: Parameters<typeof createInteractiveAuth>[0],
   ): ReturnType<typeof createInteractiveAuth> =>
     createInteractiveAuth(ctx, { serverUrl: () => panelUrl });
+}
+
+/**
+ * The dev server's MCP setting: the MCP token on `/__mcp` while the one-time
+ * code is on, as on the Express hub and the Vite plugin. Without it a local
+ * process, or a request through a tunnel, would get every agent tool with no
+ * code. `--no-auth` drops both, and `--no-mcp` turns the route off.
+ */
+export function cliMcpSetting(
+  mcp: boolean | undefined,
+  authOn: boolean,
+  token: () => string = () => process.env[PANGULAR_MCP_TOKEN_ENV] || loadMcpToken(),
+): boolean | { authorization: string } {
+  if (mcp === false) return false;
+  return authOn ? { authorization: token() } : true;
 }
 
 /** The lines the dev server prints once it listens. */
@@ -311,13 +329,15 @@ export function createPangularCli(options: PangularCliOptions = {}) {
       access = { ...access, authTokens: [] };
     }
     if (root !== process.cwd()) process.chdir(root);
-    if (!looksLikeAngularProject(root)) {
+    const angular = looksLikeAngularProject(root);
+    if (!angular) {
       console.error(
         `[pangular] ${root} has no angular.json and no package.json that depends on @angular/core, so the source scans find nothing. Pass --root <dir> or set PANGULAR_ROOT to your project folder.`,
       );
     }
     resolved = resolvePangularConfig(config);
-    current = createPangular(config, cliHostOptions(command, access));
+    // The agent never sees stderr, so the source scan tools say it too.
+    current = createPangular(config, cliHostOptions(command, access, angular ? undefined : root));
   };
 
   const configureCli = (cli: CAC) => {
@@ -325,14 +345,6 @@ export function createPangularCli(options: PangularCliOptions = {}) {
     cli.option('--root <dir>', 'Project folder to scan (default: the working directory)');
     cli.option('--config <file>', `Devtools config as JSON (default: ${PANGULAR_CONFIG_FILE})`);
     cli.option('--read-only', 'Drop the agent tools that act on the page or the server');
-    cli.option(
-      '--allowed-origin <origin>',
-      'An extra origin allowed to reach the server, such as http://192.168.1.20:8100 (repeat for more)',
-    );
-    cli.option(
-      '--auth-token <token>',
-      'A pairing token a client may send instead of the one-time code (repeat for more; prefer PANGULAR_AUTH_TOKEN)',
-    );
     registerSkillsCommand(cli, { cwd: (flags) => resolveCliRoot(flags, env), log });
     registerLintCommand(cli, { cwd: (flags) => resolveCliRoot(flags, env), log });
     const defaultCommand = cli.commands.find((command) => command.isDefaultCommand);
@@ -357,7 +369,10 @@ export function createPangularCli(options: PangularCliOptions = {}) {
             cliGatePolicy(access.allowedOrigins, listenHost, proxyUrl),
           )) as never,
           flags: flags as Record<string, unknown>,
-          mcp: pangularMcp(flags.mcp ?? true, resolved),
+          mcp: pangularMcp(
+            cliMcpSetting(flags.mcp, (flags as { auth?: boolean }).auth !== false),
+            resolved,
+          ),
           ...(access.allowedOrigins.length ? { allowedOrigins: access.allowedOrigins } : {}),
           // devframe builds the handler from a function too; its dev server
           // types only list the handler object. `--no-auth` still turns it off.
@@ -365,6 +380,20 @@ export function createPangularCli(options: PangularCliOptions = {}) {
           onReady,
         });
       };
+      // Only the dev server takes these: `build` writes files and `mcp` talks over stdio.
+      defaultCommand.option(
+        '--allowed-origin <origin>',
+        'An extra origin allowed to reach the server, such as http://192.168.1.20:8100 (repeat for more)',
+      );
+      defaultCommand.option(
+        '--auth-token <token>',
+        'A pairing token a client may send instead of the one-time code (repeat for more; prefer PANGULAR_AUTH_TOKEN)',
+      );
+      const mcpOption = defaultCommand.options.find((option) => option.name === 'mcp');
+      if (mcpOption) {
+        mcpOption.description =
+          'Serve the MCP route for agents (on by default; --no-mcp turns it off)';
+      }
       defaultCommand.option(
         '--proxy-origin <origin>',
         "Your app's dev server origin that proxies /__pangular/ to this server, such as http://localhost:4200, so the one-time code link opens there",
@@ -428,12 +457,8 @@ export function createPangularCli(options: PangularCliOptions = {}) {
         cli.parse(argv, { run: false });
         await cli.runMatchedCommand();
       } catch (error) {
-        const message = (error as Error).message ?? String(error);
-        console.error(
-          message.startsWith('[pangular]')
-            ? message
-            : `[pangular] ${message}. Run pangular --help for the commands and flags.`,
-        );
+        const text = cliErrorText(error);
+        if (text) console.error(text);
         process.exitCode = 1;
       }
     },

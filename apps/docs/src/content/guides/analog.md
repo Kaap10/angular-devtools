@@ -4,7 +4,7 @@ description: Add the devtools to an Analog app, step by step.
 ---
 
 <ngmd-hero title="Set up Analog" logo="https://analogjs.org/img/logos/analog-logo.svg" gradient>
-  One Vite plugin and one dynamic import. You get the Angular inspectors, the NgRx dock, the Analog dock and an MCP endpoint on the Vite dev server.
+  One Vite plugin. You get the Angular inspectors, the NgRx dock, the Analog dock and an MCP endpoint on the Vite dev server.
 </ngmd-hero>
 
 # Set up Analog
@@ -60,6 +60,22 @@ yarn add -D @pangular-inspector/devtools
 bun add -D @pangular-inspector/devtools
 ```
 
+### If the build fails under pnpm
+
+With pnpm, `vite build` or the dev server can stop with `SyntaxError: The requested module 'h3' does not provide an export named 'createEvent'`. `@analogjs/vite-plugin-nitro` imports `h3` without listing it as a dependency, so pnpm resolves the import to whichever `h3` it hoists. Analog's server needs `h3` 1, and this package brings `h3` 2 through *Devframe.
+
+Declare the missing dependency in `pnpm-workspace.yaml` at the root of your app (create the file if there is none), then run `pnpm install` again:
+
+```yaml
+# pnpm-workspace.yaml
+packageExtensions:
+  '@analogjs/vite-plugin-nitro':
+    dependencies:
+      h3: ^1.15.0
+```
+
+Before pnpm 10, put the same entry under `pnpm.packageExtensions` in `package.json`. Adding `h3` 1 to your own dependencies does not help, because the plugin's import still resolves to the hoisted copy.
+
 ## Step 2: Add the Vite plugin
 
 Add the plugin after `analog()`:
@@ -79,16 +95,7 @@ The plugin runs on the dev server only (`apply: 'serve'`). Production builds do 
 
 ### Plugin options
 
-All four are optional.
-
-| Option           | Default                                        | What it does                                           |
-| ---------------- | ---------------------------------------------- | ------------------------------------------------------ |
-| `base`           | `/__devframes/`                                | Where the hub is mounted.                              |
-| `apiPrefix`      | Read from your Analog config                   | The API prefix used to tell API calls from page calls. |
-| `allowedOrigins` | none                                           | Extra page origins accepted next to localhost.         |
-| `auth`           | on if a non-loopback host or origin is allowed | Whether the devtools ask for the one-time code.        |
-
-The plugin also takes the devtools options. See [Vite and Analog](../getting-started/vite.md#options) and [Configuration](../getting-started/configuration.md).
+Every option is optional. `apiPrefix` is read from your Analog config, and the one-time code (`auth`) is on by default. The plugin also takes the devtools options. See [Vite and Analog options](../getting-started/vite.md#options) for the full list and [Configuration](../getting-started/configuration.md) for the devtools options.
 
 ### Custom hostnames
 
@@ -100,7 +107,7 @@ The plugin adds the overlay to the pages the dev server serves, so `src/main.ts`
 
 ## Step 3: Open the devtools
 
-Start the dev server as usual. Then:
+Start the dev server as usual. The terminal prints a one-time code. Enter it when the page or the panel asks for it. Then:
 
 | What            | Where                                       |
 | --------------- | ------------------------------------------- |
@@ -111,12 +118,12 @@ Start the dev server as usual. Then:
 Open the **Analog** dock to see file routes, server calls, render modes, content and lint. See [the Analog inspector](../inspectors/analog.md) for each view.
 
 <ngmd-callout type="tip" title="Connect your agent">
-  Point your MCP client at <code>http://localhost:5173/__devframes/__mcp</code> with an <code>Origin</code> header. See <a href="../agents/mcp-server.md">MCP server</a>. The <code>analog-server-calls</code> and <code>analog-call-api</code> tools only work through the Vite plugin.
+  Point your MCP client at <code>http://localhost:5173/__devframes/__mcp</code> with an <code>Origin</code> header and the bearer token. See <a href="../agents/mcp-server.md">MCP server</a>. The <code>analog-list-server-calls</code> and <code>analog-run-api</code> tools only work through the Vite plugin.
 </ngmd-callout>
 
 ## Catch hydration errors from the first load
 
-The overlay can connect after the first render, so it can miss hydration errors (`NG0500` to `NG0506`) logged during the first load. `providePangularHttp()` starts listening for them when the app starts. The Analog dock lists them under **Hydration error** in **Lint**, and the `analog-current-page` tool returns them.
+The overlay can connect after the first render, so it can miss hydration errors (`NG0500` to `NG0506`) logged during the first load. `providePangularHttp()` starts listening for them when the app starts. The Analog dock lists them under **Hydration error** in **Lint**, and the `analog-inspect-page` tool returns them.
 
 Analog's own `load()` fetches and API calls show in the Analog dock without extra setup. `withPangular()` also records `HttpClient` calls in the **SSR & HTTP** tab.
 

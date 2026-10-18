@@ -1,3 +1,4 @@
+import { defaultPage, rankPages } from './default-page.ts';
 import * as v from 'valibot';
 import type {
   MutationInfo,
@@ -103,14 +104,14 @@ const NO_DATA =
   'No page reports a TanStack Query `QueryClient`. The overlay finds the client the app provides with `provideTanStackQuery()` once something has injected it. Open the app in a browser with the overlay loaded. The stdio server has no page attached.';
 
 function byRecency(state: QueryState): QueryPage[] {
-  return Object.values(state.pages).sort((a, b) => b.reportedAt - a.reportedAt);
+  return rankPages(Object.values(state.pages));
 }
 
 /** The page `page` names, or the most recent; a string is the answer when there is none. */
 export function queryPageOf(state: QueryState, page?: string): QueryPage | string {
   const pages = byRecency(state);
   if (!pages.length) return NO_DATA;
-  if (!page) return pages[0];
+  if (!page) return defaultPage(pages)!;
   return state.pages[page] ?? unknownPageText(page, pages, 'TanStack Query');
 }
 
@@ -145,7 +146,7 @@ export interface ListQueriesArgs {
   limit?: unknown;
 }
 
-/** The `list-queries` answer: queries and mutations of one page, as tables. */
+/** The `tanstack-list-queries` answer: queries and mutations of one page, as tables. */
 export function listQueriesText(state: QueryState, args: ListQueriesArgs = {}): string {
   const page = queryPageOf(state, args.page);
   if (typeof page === 'string') return page;
@@ -199,7 +200,7 @@ export function listQueriesText(state: QueryState, args: ListQueriesArgs = {}): 
   } else {
     lines.push('', 'No mutation matches.');
   }
-  lines.push('', 'Pass an id to pangular:inspect-query for the data.');
+  lines.push('', 'Pass an id to pangular:tanstack-inspect-query for the data.');
   return untrusted(cap(lines.join('\n')));
 }
 
@@ -213,7 +214,7 @@ export function findQueryItem(
       page.queries.find((q) => q.id === args.id) ?? page.mutations.find((m) => m.id === args.id);
     return (
       found ??
-      `No query or mutation ${code(args.id)} on ${code(page.pageId)}. List them with pangular:list-queries.`
+      `No query or mutation ${code(args.id)} on ${code(page.pageId)}. List them with pangular:tanstack-list-queries.`
     );
   }
   if (typeof args.key === 'string' && args.key) {
@@ -228,14 +229,14 @@ export function findQueryItem(
         .join(', ')}. Pass one id as \`id\`.`,
     );
   }
-  return 'Pass `id` (from pangular:list-queries) or `key`.';
+  return 'Pass `id` (from pangular:tanstack-list-queries) or `key`.';
 }
 
 function json(value: unknown): string {
   return '```json\n' + JSON.stringify(value, null, 2) + '\n```';
 }
 
-/** The `inspect-query` answer: the summary the page pushed and the data it sent on request. */
+/** The `tanstack-inspect-query` answer: the summary the page pushed and the data it sent on request. */
 export function inspectQueryText(
   page: QueryPage,
   item: QueryInfo | MutationInfo,

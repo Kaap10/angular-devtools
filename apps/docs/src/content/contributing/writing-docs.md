@@ -27,7 +27,7 @@ Orient every page around what the reader is trying to do. Ask: _what does the de
 
 ### How pages read
 
-- Use second person and the imperative: "Open the Router tab", not "We can open the Router tab".
+- Use second person and the imperative: "Open the Routes tab", not "We can open the Routes tab".
 - Use present tense: "The tab shows", not "The tab will show".
 - Use active voice: "On Angular 20 and later, the overlay reads the page after change detection", not "The page is read after change detection".
 - One idea per sentence. Keep sentences short and plain.
@@ -134,7 +134,7 @@ The site uses NgMd's authoring components. Write them as raw HTML inside the mar
 | `<ngmd-workflow>` + `<ngmd-step>`            | Ordered steps.                                                    | step: `title`                                                                                                               |
 | `<ngmd-accordion>` + `<ngmd-accordion-item>` | FAQ sections.                                                     | item: `title`, `open`                                                                                                       |
 | `<ngmd-pill-row>` + `<ngmd-pill>`            | A row of related links at the end of a page.                      | pill: `href`, `title`                                                                                                       |
-| `<ngmd-badge>`                               | A status chip next to a heading.                                  | `variant` (`new`, `updated`, `alpha`, `beta`, `stable`, `deprecated`)                                                       |
+| `<ngmd-badge>`                               | A status chip next to a heading.                                  | `variant` (`new`, `updated`, `alpha`, `beta`, `stable`, `deprecated`, `action`, `destructive`)                              |
 | `<ngmd-tabs>` + `<ngmd-tab>`                 | The same content in several forms, when a code group doesn't fit. | tab: `title`, `icon`, `image`                                                                                               |
 | `<ngmd-image>`, `<ngmd-video>`               | Screenshots and YouTube or Vimeo videos.                          | image: `src`, `alt`, `caption`, `width`. video: `src`, `title`                                                              |
 
@@ -170,7 +170,7 @@ node scripts/docs-screenshots.mjs --only components,signals
 
 ### Fences
 
-Always set the language. When the code belongs in a specific file, put the path in a comment on the first line. Highlight the lines that matter with `{...}` after the language.
+Always set the language. When the code belongs in a specific file, put the path in a comment on the first line. JSON has no comments and the copy button copies the whole block, so for a JSON sample name the file in the sentence above it instead. Highlight the lines that matter with `{...}` after the language.
 
 ````md
 ```ts {6}

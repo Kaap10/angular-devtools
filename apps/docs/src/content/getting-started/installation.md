@@ -14,11 +14,11 @@ The devtools ship as one npm package, `@pangular-inspector/devtools`. It contain
 ## Prerequisites
 
 <ngmd-card-grid columns="3">
-  <ngmd-card icon="terminal" title="Node.js 22 or later">
-    The package declares <code>node &gt;=22</code> in its <code>engines</code> field, and <code>initPangularHub()</code> needs 22.12 or later. Your app's tools may need more: the Angular 22.2 CLI needs Node.js 22.22.3 or later, and the Analog app template needs npm 11. CI tests Node.js 22 and 24.
+  <ngmd-card icon="terminal" title="Node.js 22.12 or later">
+    The package declares <code>node &gt;=22.12.0</code> in its <code>engines</code> field, which <code>initPangularHub()</code> needs. Your app's tools may need more: the Angular 22.2 CLI needs Node.js 22.22.3 or later, and the Analog app template needs npm 11. CI tests Node.js 22 and 24.
   </ngmd-card>
-  <ngmd-card icon="code" title="Angular 12.2 or later">
-    <code>&#64;angular/core</code> and <code>&#64;angular/common</code> 12.2 and newer are supported, with no upper bound. Older versions show less data. See <a href="#supported-angular-versions">Supported Angular versions</a>.
+  <ngmd-card icon="code" title="Angular 12.2 to 22">
+    <code>&#64;angular/core</code> and <code>&#64;angular/common</code> 12.2 up to, but not including, 23.0 are supported. The upper bound moves up once a release is tested on the next major. Older versions show less data. See <a href="#supported-angular-versions">Supported Angular versions</a>.
   </ngmd-card>
   <ngmd-card icon="box" title="Package manager">
     pnpm, npm, yarn or bun. Any of the four.
@@ -64,14 +64,14 @@ On Angular 12 to 19 the overlay degrades as the table above shows:
 
 ### Setup on Angular 12 to 19
 
-| Setup                                    | Angular 12 to 16                                                                                                                                                      | Angular 17 to 19                                                                    |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Overlay import in `main.ts`              | Works with the webpack-based `@angular-devkit/build-angular:browser` builder. Signal history uses samples, since `@angular/core/primitives/signals` exists from 17.0. | Works with `browser` and `application`. Under webpack, signal history uses samples. |
-| Vite plugin (Analog)                     | Works. The plugin points `@angular/core/primitives/signals` at a stub before 17.0.                                                                                    | Works.                                                                              |
-| `initPangularHub()` in an Express server | Works when the server runs on Node.js 22.12 or later. If the server must stay on an older Node.js, run the standalone CLI on Node.js 22 or later beside it instead.   | Works.                                                                              |
-| Standalone CLI next to `ng serve`        | Works. Run `npx pangular dev` with Node.js 22 or later, and the app's own CLI with the Node.js version it supports.                                                   | Works.                                                                              |
-| Chrome extension                         | Works on top of any of the setups above.                                                                                                                              | Works.                                                                              |
-| `@pangular-inspector/devtools/http`      | Not available. It imports `REQUEST` and `provideEnvironmentInitializer`, so the build fails. Leave it out; the HTTP timeline and fault rules need it.                 | Not available before 19.0, for the same reason.                                     |
+| Setup                                    | Angular 12 to 16                                                                                                                                                                                                 | Angular 17 to 19                                                                    |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Overlay import in `main.ts`              | Works with the webpack-based `@angular-devkit/build-angular:browser` builder. Signal history uses samples, since `@angular/core/primitives/signals` exists from 17.0.                                            | Works with `browser` and `application`. Under webpack, signal history uses samples. |
+| Vite plugin (Analog)                     | Works. The plugin points `@angular/core/primitives/signals` at a stub before 17.0.                                                                                                                               | Works.                                                                              |
+| `initPangularHub()` in an Express server | Works when the server runs on Node.js 22.12 or later. On an older Node.js the hub logs why and turns itself off. To keep the devtools there, run the standalone CLI on Node.js 22.12 or later beside it instead. | Works.                                                                              |
+| Standalone CLI next to `ng serve`        | Works. Run `npx pangular dev` with Node.js 22.12 or later, and the app's own CLI with the Node.js version it supports.                                                                                           | Works.                                                                              |
+| Chrome extension                         | Works on top of any of the setups above.                                                                                                                                                                         | Works.                                                                              |
+| `@pangular-inspector/devtools/http`      | Not available. It imports `REQUEST` and `provideEnvironmentInitializer`, so the build fails. Leave it out; the HTTP timeline and fault rules need it.                                                            | Not available before 19.0, for the same reason.                                     |
 
 With the webpack-based `browser` builder, use the standalone CLI next to `ng serve`, as in [Client-only Angular CLI app](#client-only-angular-cli-app), or the Express hub for an SSR app.
 
@@ -84,7 +84,7 @@ declare module '@pangular-inspector/devtools/overlay';
 
 ### Tested versions
 
-The peer range is `@angular/core` and `@angular/common` `>=12.2` with no upper bound. CI tests these versions:
+The peer range is `@angular/core` and `@angular/common` `>=12.2.0 <23.0.0`. The overlay reads Angular's private debug APIs, so each new major is tested before the range takes it in. CI tests these versions:
 
 | Angular                 | Node.js | What runs                                                                 | When                                  |
 | ----------------------- | ------- | ------------------------------------------------------------------------- | ------------------------------------- |
@@ -93,8 +93,10 @@ The peer range is `@angular/core` and `@angular/common` `>=12.2` with no upper b
 | 17.3                    | 22      | The page-side tests against a real Angular app                            | Every push to `main`, and weekly      |
 | 19.2                    | 22      | The page-side tests against a real Angular app                            | Every push to `main`, and weekly      |
 | 20.0                    | 22      | The page-side tests against a real Angular app                            | Every push to `main`, and weekly      |
+| 20.3 (latest 20.x)      | 22      | The page-side tests against a real Angular app                            | Every push to `main`, and weekly      |
 | 21 (latest 21.x)        | 22      | The page-side tests against a real Angular app                            | Every push to `main`, and weekly      |
 | 22 (latest 22.x)        | 22      | The page-side tests, including Signal Forms                               | Every push to `main`, and weekly      |
+| `next` (prerelease)     | 22      | The page-side tests. A failure is reported but does not fail the run      | Every push to `main`, and weekly      |
 | 22 (repository version) | 24      | Every package and panel test, the type checks and axe                     | Every pull request and push to `main` |
 | Newest the ranges allow | 24      | A fresh Angular CLI app and a fresh Analog app with the package installed | Weekly                                |
 
@@ -194,7 +196,6 @@ npx @pangular-inspector/devtools
 ```
 
 ```json group="setup" name="Client-only Angular CLI" image="https://cdn.simpleicons.org/angular/DD0031"
-// proxy.conf.json
 {
   "/__pangular": {
     "target": "http://localhost:9999",
@@ -204,7 +205,7 @@ npx @pangular-inspector/devtools
 }
 ```
 
-A client-only app (no SSR) has no server of its own to mount the devtools in. See [Client-only Angular CLI app](#client-only-angular-cli-app).
+A client-only app (no SSR) has no server of its own to mount the devtools in. Its tab shows `proxy.conf.json`, which forwards `/__pangular` to the standalone CLI. See [Client-only Angular CLI app](#client-only-angular-cli-app).
 
 ### Browser part
 
@@ -252,8 +253,9 @@ An app created with `ng new --ssr=false` only runs `ng serve`. Run the standalon
   </ngmd-step>
 </ngmd-workflow>
 
+Point the dev server at the proxy file in `angular.json` (excerpt):
+
 ```json
-// angular.json (excerpt)
 {
   "projects": {
     "my-app": {

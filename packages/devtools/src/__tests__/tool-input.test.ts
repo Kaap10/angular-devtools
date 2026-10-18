@@ -87,15 +87,69 @@ describe('checkToolArgs', () => {
     );
   });
 
-  it('never lets a non-string page fall back to another tab, aliases included', () => {
+  it('never lets a non-string page fall back to another tab', () => {
     expect(error({ selector: 'x', page: 12345 })).toBe(
       '`page` must be a string, not the number (12345). Pass a page id from pangular:list-pages, or leave it out for the most recent page.',
     );
-    // `pageId` is an alias the schema does not list.
-    expect(error({ selector: 'x', pageId: { id: 'p1' } })).toMatch(
-      /^`pageId` must be a string, not an object/,
+  });
+
+  it('refuses the argument names 1.0 renamed, naming the new one', () => {
+    // `pageId` was the second page argument; it is refused even where the tool has no `page`.
+    expect(error({ selector: 'x', pageId: 'p1' })).toBe(
+      'There is no `pageId` argument; pass `page`.',
     );
-    expect(error({ selector: 'x', pageId: false })).toMatch(/^`pageId` must be a string/);
+    expect(error({ pageId: 'p1' }, { type: 'object', properties: {} })).toBe(
+      'There is no `pageId` argument.',
+    );
+    const component = { type: 'object', properties: { component: { type: 'string' } } };
+    expect(error({ selector: 'Card' }, component)).toBe(
+      'There is no `selector` argument; pass `component`.',
+    );
+    const injector = { type: 'object', properties: { injector: { type: 'string' } } };
+    expect(error({ selector: 'Root' }, injector)).toBe(
+      'There is no `selector` argument; pass `injector`.',
+    );
+    const store = { type: 'object', properties: { store: {}, after: { type: 'number' } } };
+    expect(error({ storeId: 'ngrx-1', since: 3 }, store)).toBe(
+      'There is no `storeId` argument; pass `store`.\nThere is no `since` argument; pass `after`.',
+    );
+    expect(error({ signal: 'count' }, { properties: { property: {} } })).toBe(
+      'There is no `signal` argument; pass `property`.',
+    );
+    // A tool that still lists the name keeps it, as explain-field keeps its CSS `selector`.
+    expect(error({ selector: '#email' }, { properties: { selector: { type: 'string' } } })).toBe(
+      undefined,
+    );
+  });
+
+  it('refuses an argument 1.0 moved to another tool, naming that tool', () => {
+    const none = { type: 'object', properties: { page: { type: 'string' } } };
+    const moved = (tool: string, args: Record<string, unknown>) => {
+      const checked = checkToolArgs(none, args, `pangular:${tool}`);
+      return 'error' in checked ? checked.error : undefined;
+    };
+    for (const key of ['record', 'flash', 'track', 'angularProfiling']) {
+      expect(moved('change-detection', { [key]: true })).toBe(
+        `There is no \`${key}\` argument; use \`pangular:record-change-detection\`.`,
+      );
+    }
+    expect(moved('hydration', { overlay: true })).toBe(
+      'There is no `overlay` argument; use `pangular:highlight` with `hydration`.',
+    );
+    expect(moved('navigate', { routeId: 'r1' })).toBe(
+      'There is no `routeId` argument; use `pangular:list-routes` with `resolveLazy`.',
+    );
+    expect(moved('navigate', { on: true })).toBe(
+      'There is no `on` argument; use `pangular:record-guards` with `on`.',
+    );
+    // Only on the tool the argument left, and only while its schema lacks the key.
+    expect(moved('list-routes', { routeId: 'r1' })).toBeUndefined();
+    expect(
+      checkToolArgs(SCHEMA, { selector: 'x', record: 'start' }, 'pangular:change-detection'),
+    ).toEqual({
+      args: { selector: 'x', record: 'start' },
+    });
+    expect(error({ selector: 'x', overlay: true })).toBeUndefined();
   });
 
   it('treats null and an empty page as left out', () => {

@@ -10,6 +10,12 @@ import type {
 } from '../types.ts';
 import { redactMessage, redactUrl } from '../router.ts';
 import { untrusted } from './forms-tools.ts';
+import {
+  guardComponentDetail,
+  guardComponentRoots,
+  guardDeferBlocks,
+  guardForBlocks,
+} from './component-report-guard.ts';
 import { PAGE_TTL_MS, fixedTtl, type PageTtl } from './page-ttl.ts';
 import { capped } from './router-tools.ts';
 
@@ -30,9 +36,10 @@ export function isComponentReport(value: unknown): value is Omit<ComponentPage, 
 export function toComponentPage(report: Omit<ComponentPage, 'reportedAt'>, now = Date.now()) {
   const page: ComponentPage = {
     pageId: report.pageId,
-    roots: report.roots,
-    count: typeof report.count === 'number' ? report.count : 0,
-    detail: report.detail ?? null,
+    // Checked node by node: one page's bad entry must not break the tools for every page.
+    roots: guardComponentRoots(report.roots),
+    count: typeof report.count === 'number' && Number.isFinite(report.count) ? report.count : 0,
+    detail: guardComponentDetail(report.detail),
     reportedAt: now,
   };
   if (report.truncated) page.truncated = true;
@@ -55,13 +62,13 @@ export function toComponentPage(report: Omit<ComponentPage, 'reportedAt'>, now =
   if (typeof report.url === 'string') page.url = redactUrl(report.url.slice(0, 2000));
   if (typeof report.title === 'string') page.title = redactMessage(report.title.slice(0, 200));
   if (Array.isArray(report.deferBlocks)) {
-    page.deferBlocks = report.deferBlocks.slice(0, MAX_DEFER_BLOCKS);
+    page.deferBlocks = guardDeferBlocks(report.deferBlocks.slice(0, MAX_DEFER_BLOCKS));
     if (report.deferTruncated === true || report.deferBlocks.length > MAX_DEFER_BLOCKS) {
       page.deferTruncated = true;
     }
   }
   if (Array.isArray(report.forBlocks)) {
-    page.forBlocks = report.forBlocks.slice(0, MAX_FOR_BLOCKS);
+    page.forBlocks = guardForBlocks(report.forBlocks.slice(0, MAX_FOR_BLOCKS));
     if (report.forBlocksTruncated || report.forBlocks.length > MAX_FOR_BLOCKS) {
       page.forBlocksTruncated = true;
     }
@@ -243,7 +250,7 @@ export function deferBlocksText(
   angularOf: (pageId: string) => AngularPageInfo | undefined = () => undefined,
 ): string {
   if (!pages.length) {
-    return 'No component tree has been reported. Live data needs a page: connect through the MCP endpoint of the server that runs the app, with the app open in a browser. The stdio server has no page attached and only ever reports this.';
+    return 'No component tree has been reported. Live data needs a page: connect through the MCP endpoint of the server that runs the app, with the app open in a browser. The stdio MCP server has no page, so there it always answers this.';
   }
   const cell = (text: string) => text.replace(/\|/g, '\\|');
   const narrow = `${pages.length > 1 ? ' Pass `page` to read one tab.' : ''} ${PANEL}.`;

@@ -23,7 +23,40 @@ export interface ToolInputSchema {
 
 export type CheckedArgs = { args: Record<string, unknown> } | { error: string };
 
-const PAGE_KEYS = new Set(['page', 'pageId']);
+const PAGE_KEYS = new Set(['page']);
+
+/**
+ * Argument names that 1.0 renamed, with the names that took their place. A
+ * call that sends an old name the schema does not list is refused with the
+ * new one, instead of the value being dropped without a word.
+ */
+const RENAMED_ARGUMENTS: Readonly<Record<string, readonly string[]>> = {
+  pageId: ['page'],
+  selector: ['component', 'injector'],
+  storeId: ['store'],
+  signal: ['property', 'node'],
+  since: ['after'],
+};
+
+/**
+ * Arguments that 1.0 moved to another tool, by the tool they left: each names
+ * where to go instead. Checked only while that tool's schema lacks the key, as
+ * for {@link RENAMED_ARGUMENTS}, so the value is refused instead of dropped.
+ */
+const MOVED_ARGUMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  'change-detection': {
+    record: '`pangular:record-change-detection`',
+    flash: '`pangular:record-change-detection`',
+    track: '`pangular:record-change-detection`',
+    angularProfiling: '`pangular:record-change-detection`',
+  },
+  hydration: { overlay: '`pangular:highlight` with `hydration`' },
+  navigate: {
+    routeId: '`pangular:list-routes` with `resolveLazy`',
+    on: '`pangular:record-guards` with `on`',
+  },
+};
+
 const PAGE_HINT =
   'Pass a page id from pangular:list-pages, or leave it out for the most recent page.';
 /** Problems named in one answer; the rest wait for the next call. */
@@ -190,11 +223,13 @@ function describe(schema: ToolInputSchema | undefined): string {
  * that allows `null` keeps it, required or not.
  * Keys the schema does not list pass through, unless it sets
  * `additionalProperties: false`, or are checked against `additionalProperties`
- * when it is a schema, as for a listed argument. A `page` or `pageId` must be a string, even
- * when the schema leaves the alias out, so a wrong one is refused instead of
- * falling back to another tab; an empty one counts as left out.
+ * when it is a schema, as for a listed argument. A `page` must be a string,
+ * so a wrong one is refused instead of falling back to another tab; an empty
+ * one counts as left out. An argument name 1.0 renamed is refused with the
+ * name that replaced it (see {@link RENAMED_ARGUMENTS}), and one 1.0 moved off
+ * `toolId` with the tool to use instead (see {@link MOVED_ARGUMENTS}).
  */
-export function checkToolArgs(schema: unknown, input: unknown): CheckedArgs {
+export function checkToolArgs(schema: unknown, input: unknown, toolId?: string): CheckedArgs {
   if (input !== undefined && input !== null && !isRecord(input)) {
     return {
       error: `The arguments must be an object of named values, not ${sent(input)}.`,
@@ -205,6 +240,7 @@ export function checkToolArgs(schema: unknown, input: unknown): CheckedArgs {
   const shape = schema as ToolInputSchema;
   const properties = shape.properties ?? {};
   const problems: string[] = [];
+  const moved = toolId ? movedFrom(toolId) : undefined;
 
   const missing = (shape.required ?? []).filter((key) => isMissing(args[key], properties[key]));
   for (const key of missing) problems.push(`Pass \`${key}\`${describe(properties[key])}.`);
@@ -224,9 +260,15 @@ export function checkToolArgs(schema: unknown, input: unknown): CheckedArgs {
       if (property && nullIsMissing(property)) delete args[key];
       continue;
     }
-    if (property) problems.push(...problemsOf(key, value, property));
+    const renamed = properties[key] ? undefined : renamedTo(key, properties);
+    const movedTo =
+      properties[key] || !moved || !Object.hasOwn(moved, key) ? undefined : moved[key];
+    if (renamed) problems.push(`There is no \`${key}\` argument; pass \`${renamed}\`.`);
+    else if (movedTo) problems.push(`There is no \`${key}\` argument; use ${movedTo}.`);
+    // The old page argument never passes unnoticed, even on a tool without `page`.
+    else if (key === 'pageId' && !properties[key]) problems.push('There is no `pageId` argument.');
+    else if (property) problems.push(...problemsOf(key, value, property));
     else if (PAGE_KEYS.has(key) && typeof value !== 'string')
-      // An alias such as `pageId` that the schema leaves out still never falls back.
       problems.push(...problemsOf(key, value, { type: 'string' }));
     else if (shape.additionalProperties === false)
       problems.push(`There is no \`${key}\` argument.`);
@@ -238,18 +280,32 @@ export function checkToolArgs(schema: unknown, input: unknown): CheckedArgs {
   return { error: shown.join('\n') };
 }
 
+/** The argument that replaced the retired name `key` in this schema, if any. */
+function renamedTo(key: string, properties: Record<string, ToolInputSchema>): string | undefined {
+  if (!Object.hasOwn(RENAMED_ARGUMENTS, key)) return undefined;
+  return RENAMED_ARGUMENTS[key]!.find((name) => Object.hasOwn(properties, name));
+}
+
+/** The arguments 1.0 moved off the tool `toolId` (`pangular:<name>`). */
+function movedFrom(toolId: string): Readonly<Record<string, string>> | undefined {
+  const name = toolId.replace(/^pangular:/, '');
+  return Object.hasOwn(MOVED_ARGUMENTS, name) ? MOVED_ARGUMENTS[name] : undefined;
+}
+
 /**
  * Wraps a tool handler so that it runs only with arguments that fit
  * `inputSchema`, and so that a refusal it answers with (see `refusal()`) is
  * sent with `isError: true`. Both come back to the caller as a thrown
- * {@link ToolRefusal}, which devframe turns into an error result.
+ * {@link ToolRefusal}, which devframe turns into an error result. `toolId`
+ * names the tool for the arguments it no longer takes (see {@link checkToolArgs}).
  */
 export function guardHandler<R>(
   inputSchema: unknown,
   handler: (args: never) => R,
+  toolId?: string,
 ): (args: unknown) => Promise<Awaited<R>> {
   return async (input: unknown): Promise<Awaited<R>> => {
-    const checked = checkToolArgs(inputSchema, input);
+    const checked = checkToolArgs(inputSchema, input, toolId);
     if ('error' in checked) throw new ToolRefusal(checked.error, 'Invalid arguments');
     const result = await handler(checked.args as never);
     const refused = refusalOf(result);

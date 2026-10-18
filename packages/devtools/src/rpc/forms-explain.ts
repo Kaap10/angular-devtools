@@ -54,7 +54,7 @@ function unmatchedForms(
 ): string | null {
   if (matched.length || (!args.form && !args.page)) return null;
   return state.forms.length
-    ? noMatch(onPage(state.forms, args.page), args.form ?? args.page ?? '')
+    ? noMatch(onPage(state.forms, args.page), args.form ?? args.page ?? '', args.page)
     : 'No forms have been reported.';
 }
 
@@ -62,7 +62,7 @@ function pickForm(state: FormsState, args: FieldArgs): CollectedForm | string {
   const forms = matchForms(state.forms, args.form, args.page);
   if (!forms.length) {
     return state.forms.length
-      ? noMatch(onPage(state.forms, args.page), args.form ?? '')
+      ? noMatch(onPage(state.forms, args.page), args.form ?? '', args.page)
       : 'No forms have been reported.';
   }
   if (forms.length === 1) return forms[0];
@@ -77,8 +77,11 @@ function exactForm(forms: CollectedForm[], query: string | undefined): Collected
   return short.length === 1 ? short[0] : null;
 }
 
+/** A refusal (`isError`): the short form id matches forms on several pages. */
 function ambiguous(forms: CollectedForm[]): string {
-  return `${forms.length} forms match; pass the full \`form\` id: ${forms.map((f) => `${f.id} ${code(f.label)}`).join(', ')}.`;
+  return refusal(
+    `${forms.length} forms match; pass the full \`form\` id: ${forms.map((f) => `${f.id} ${code(f.label)}`).join(', ')}.`,
+  );
 }
 
 export function resolveForm(
@@ -416,7 +419,7 @@ function list(paths: string[]): string {
 export interface HistoryArgs extends FieldArgs {
   type?: string;
   origin?: string;
-  since?: number;
+  after?: number;
   limit?: number;
 }
 
@@ -432,7 +435,7 @@ export function formHistoryText(state: FormsState, args: HistoryArgs): string {
       (args.path === undefined || e.path === args.path || e.path.startsWith(`${args.path}.`)) &&
       (!args.type || e.type === args.type) &&
       (!args.origin || e.origin === args.origin) &&
-      (args.since === undefined || (e.seq ?? 0) > args.since),
+      (args.after === undefined || (e.seq ?? 0) > args.after),
   );
   const marker = latestMarker(state);
   const pages = new Set(forms.map((f) => f.id.split('@')[1] ?? ''));
@@ -445,11 +448,11 @@ export function formHistoryText(state: FormsState, args: HistoryArgs): string {
   const lines = events
     .slice(-limit)
     .map((e) => `${eventLine(e)} in ${code(byForm.get(e.formId) ?? e.formId)}`);
-  return `${UNTRUSTED}\n\n${lines.join('\n')}\n\nMarker: ${marker} (pass as \`since\` to form-diff or form-history).${note}`;
+  return `${UNTRUSTED}\n\n${lines.join('\n')}\n\nMarker: ${marker} (pass as \`after\` to explain-form-changes or list-form-changes).${note}`;
 }
 
-export function formDiffText(state: FormsState, args: FieldArgs & { since?: number }): string {
-  const since = args.since ?? 0;
+export function formDiffText(state: FormsState, args: FieldArgs & { after?: number }): string {
+  const since = args.after ?? 0;
   const forms = matchForms(state.forms, args.form, args.page);
   const unmatched = unmatchedForms(state, args, forms);
   if (unmatched) return unmatched;
@@ -494,7 +497,7 @@ export function formDiffText(state: FormsState, args: FieldArgs & { since?: numb
       : '';
   const shown = capLines(
     lines.filter((line): line is string => !!line),
-    'pass `form`, or a later `since` marker, to narrow it down',
+    'pass `form`, or a later `after` marker, to narrow it down',
   );
   return `${UNTRUSTED}\n\n${shown.length ? shown.join('\n') : 'Changes cancelled out.'}\n\nMarker now: ${marker}.${gap}`;
 }
@@ -663,7 +666,7 @@ function fixtureHeader(form: CollectedForm, invalid: FormFieldNode[], reportedAt
     .map((n) => line(`${n.path || '(form)'} ${n.errors.map((e) => e.kind).join('+')}`));
   const more =
     invalid.length > MAX_HEADER_ERRORS
-      ? ` and ${invalid.length - MAX_HEADER_ERRORS} more not shown (call explain-form-invalid for all)`
+      ? ` and ${invalid.length - MAX_HEADER_ERRORS} more not shown (call explain-invalid-forms for all)`
       : '';
   return [
     `// ${line(form.label)} (${form.kind}) captured ${new Date(reportedAt).toISOString()}`,
@@ -673,13 +676,13 @@ function fixtureHeader(form: CollectedForm, invalid: FormFieldNode[], reportedAt
 }
 
 const EXPORT_NARROW =
-  'read the rest with inspect-forms or form-payload and a `path`, one group at a time';
+  'read the rest with inspect-forms or inspect-form-payload and a `path`, one group at a time';
 
 export type WaitUntil = 'settled' | 'valid' | 'not-pending' | 'submitted';
 
 export function waitSatisfied(
   state: FormsState,
-  args: FieldArgs & { until?: WaitUntil; since?: number },
+  args: FieldArgs & { until?: WaitUntil; after?: number },
 ): boolean {
   const forms = matchForms(state.forms, args.form, args.page);
   if (!forms.length) return false;
@@ -690,7 +693,7 @@ export function waitSatisfied(
     if (until === 'not-pending') return status !== 'PENDING';
     if (until === 'submitted') {
       return state.events.some(
-        (e) => e.formId === form.id && e.type === 'submit' && (e.seq ?? 0) > (args.since ?? 0),
+        (e) => e.formId === form.id && e.type === 'submit' && (e.seq ?? 0) > (args.after ?? 0),
       );
     }
     let debouncing = false;
