@@ -15,6 +15,7 @@ import { registerComponentValues } from './component-values-overlay.ts';
 import { configFromConnection } from './config.ts';
 import { elementById } from './element-id.ts';
 import { setRedaction } from './forms-privacy.ts';
+import { legacyRedaction, serverRedaction } from './overlay-redaction.ts';
 import { hostBySelector } from './host-tree.ts';
 import { collectInjectorTree } from './injector-tree.ts';
 import {
@@ -206,7 +207,11 @@ async function startSession(
   const config = configFromConnection(rpc.connectionMeta);
   const on = config.inspectors;
   const tickMs = intervalMs ?? config.limits.refreshMs;
-  setRedaction(config.redaction);
+  // Sent only to a trusted connection, so it is not in `__connection.json`.
+  // Without it nothing is read: the session fails and the next attempt asks again.
+  const redaction = await serverRedaction(my.rpc, legacyRedaction(rpc.connectionMeta));
+  if (!redaction) throw new Error('[pangular] Could not read the redaction config');
+  setRedaction(redaction);
   const title = `NativeScript (${isAndroid ? 'Android' : 'iOS'})`;
 
   const tree = nativeScriptTree(angularDebugApi, () => Application.getRootView() as NativeView);

@@ -376,6 +376,8 @@ const CAPS = {
   'export-form': 20_000,
   'capacitor-list-calls': 20_000,
   'capacitor-list-plugins': 20_000,
+  'scan-components': 20_000,
+  'scan-signals': 20_000,
   'ngrx-export-session': 60_000,
   'change-detection': 100_000,
 };
@@ -611,8 +613,10 @@ const READ_PLAN = [
   ['scan-build', null, () => ({})],
   ['scan-routes', null, () => ({})],
   ['scan-components', null, () => ({})],
+  ['scan-components', null, () => ({ filter: 'example', limit: 3 })],
   ['scan-pipes', null, () => ({})],
   ['scan-signals', null, () => ({})],
+  ['scan-signals', null, () => ({ filter: 'signal', offset: 1, limit: 5 })],
   ['scan-providers', null, () => ({})],
   ['ngrx-scan', null, () => ({})],
   ['devframes_plugin_messages_list', null, () => ({})],
@@ -2029,11 +2033,17 @@ async function runActions(state) {
     booked,
     r.markdown.slice(0, 300),
   );
-  const stores = await read('ngrx-inspect-store', { store: ctx.storeId('TravelStore') });
+  // The page reports the store change a moment after it shows the confirmation, so wait for it.
+  const holdsBooking = (text) => /Ada Lovelace|BK-?\d+|booking[^\n]*\(1\)/i.test(text);
+  let stores = '';
+  await waitUntil(async () => {
+    stores = await read('ngrx-inspect-store', { store: ctx.storeId('TravelStore') });
+    return holdsBooking(stores);
+  }, 5000);
   write(
     'run-form-action',
     'TravelStore holds the booking',
-    /Ada Lovelace|BK-?\d+|booking[^\n]*\(1\)/i.test(stores),
+    holdsBooking(stores),
     stores.slice(0, 300),
   );
   const submitHistory = await read('list-form-changes', { form, type: 'submit' });

@@ -111,7 +111,7 @@ bootstrapApplication(App, appConfig).then(async () => {
 });
 ```
 
-`baseURL` takes one path or a list of paths to try in order. `initOverlay` resolves to a function that stops the overlay it started and removes its hooks.
+`baseURL` takes one path or a list of paths to try in order. `initOverlay` resolves to a function that stops the overlay it started and removes its hooks. If the page still needs the one-time code, `initOverlay` resolves once it is connected, and the overlay starts reading the app after the code is entered.
 
 The floating button follows the path the overlay connected to. If that path is `<base>pangular/` and a hub answers at `<base>`, the button opens the hub. Otherwise it opens the devtools panel at that path.
 
@@ -163,7 +163,7 @@ await initOverlay({
 
 With `connectionMeta`, the overlay resolves paths against one `baseURL`, so pass a single URL. `initOverlay` rejects a list, or no `baseURL`, with an error that says so.
 
-Without `configs`, the page runs every inspector with the default limits and redaction, and the server's `redaction.secretNames` are not applied on the page. The overlay logs a warning once. To use the server's config, pass the whole `__connection.json` of the server as `connectionMeta`.
+Without `configs`, the page runs every inspector with the default limits. The overlay logs a warning once. To use the server's config, pass the whole `__connection.json` of the server as `connectionMeta`. The server's `redaction` config is not in that file: the page asks the server for it once it is trusted, with or without `connectionMeta`.
 
 The endpoints must still accept the page's origin. [Set up Capacitor](../guides/capacitor.md) uses this for an app in a mobile WebView.
 
